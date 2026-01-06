@@ -1,0 +1,1667 @@
+{% extends 'base.html' %}
+
+{% block title %}QR Scanner - Smart Supply Management System{% endblock %}
+
+{% block content %}
+<style>
+    /* Scanner overlay styles */
+    .scanner-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+    }
+    
+    .scan-region-highlight {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 200px;
+        height: 200px;
+        margin-left: -100px;
+        margin-top: -100px;
+        border: 2px solid #00ff00;
+        box-shadow: 0 0 0 1000px rgba(0, 0, 0, 0.5);
+        border-radius: 10px;
+    }
+    
+    /* Modal styles */
+    .modal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.5);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 1000;
+    }
+    
+    .modal.hidden {
+        display: none;
+    }
+    
+    .modal-content {
+        background-color: white;
+        border-radius: 0.5rem;
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        padding: 1.5rem;
+        max-width: 90%;
+        width: 500px;
+        max-height: 90vh;
+        overflow-y: auto;
+    }
+</style>
+
+<!-- Page Header -->
+<div class="mb-8">
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between">
+        <div>
+            <h1 class="text-3xl font-bold text-gray-800 mb-2">QR Scanner</h1>
+            <p class="text-gray-600">Scan QR codes to track, issue, or return supply items</p>
+        </div>
+    </div>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <!-- Camera Scanner -->
+    <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <h2 class="text-lg font-semibold text-gray-800 mb-4">Camera Scanner</h2>
+        
+        <div class="relative">
+            <!-- Video Container -->
+            <div class="relative bg-gray-900 rounded-lg overflow-hidden aspect-video flex items-center justify-center">
+                <!-- Video Placeholder -->
+                <div id="video-placeholder" class="absolute inset-0 flex flex-col items-center justify-center text-gray-400">
+                    <i class="fas fa-camera text-4xl mb-2"></i>
+                    <p>Camera not started</p>
+                    <button id="start-camera" 
+                            class="mt-3 inline-flex items-center px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors">
+                        <i class="fas fa-play mr-2"></i>
+                        Start Camera
+                    </button>
+                </div>
+                
+                <!-- Video Element -->
+                <video id="video" class="hidden w-full h-full object-cover" playsinline></video>
+                
+                <!-- Scanner Overlay -->
+                <div id="scanner-overlay" class="scanner-overlay hidden">
+                    <div class="scan-region-highlight"></div>
+                </div>
+            </div>
+            
+            <!-- Camera Controls -->
+            <div class="flex space-x-2 mt-4">
+                <button id="stop-camera" 
+                        class="hidden inline-flex items-center px-4 py-2 bg-gray-600 text-white text-sm font-medium rounded-lg hover:bg-gray-700 transition-colors">
+                    <i class="fas fa-stop mr-2"></i>
+                    Stop Camera
+                </button>
+            </div>
+            
+            <!-- Camera Status -->
+            <div id="camera-status" class="mt-2 text-sm text-gray-600"></div>
+        </div>
+    </div>
+
+    <!-- Manual Input -->
+    <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <h2 class="text-lg font-semibold text-gray-800 mb-4">Manual Input</h2>
+        
+        <form id="manual-scan-form" class="space-y-4">
+            <div>
+                <label for="qr-data" class="block text-sm font-medium text-gray-700 mb-2">
+                    QR Code Data or Supply ID
+                </label>
+                <input type="text" 
+                       id="qr-data" 
+                       name="qr_data" 
+                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                       placeholder="Enter supply ID or scan QR code">
+            </div>
+            
+            <div>
+                <label for="action" class="block text-sm font-medium text-gray-700 mb-2">
+                    Action
+                </label>
+                <select id="action" 
+                        name="action" 
+                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                    <option value="scan">Scan - Track Location</option>
+                    <option value="issue">Issue - Remove from Stock</option>
+                    <option value="return">Return - Add to Stock</option>
+                </select>
+                <p id="action-description" class="mt-1 text-sm text-gray-500">View current location of this supply item</p>
+            </div>
+            
+            <!-- Quantity (hidden by default) -->
+            <div id="quantity-container" class="hidden">
+                <label for="quantity" class="block text-sm font-medium text-gray-700 mb-2">
+                    Quantity
+                </label>
+                <input type="number" 
+                       id="quantity" 
+                       name="quantity" 
+                       min="1" 
+                       value="1"
+                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+            </div>
+            
+            <div>
+                <label for="location" class="block text-sm font-medium text-gray-700 mb-2">
+                    Location
+                </label>
+                <input type="text" 
+                       id="location" 
+                       name="location" 
+                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                       placeholder="Current location will be displayed">
+            </div>
+            
+            <div>
+                <label for="notes" class="block text-sm font-medium text-gray-700 mb-2">
+                    Notes (Optional)
+                </label>
+                <textarea id="notes" 
+                          name="notes" 
+                          rows="2" 
+                          class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                          placeholder="Add any notes about this scan..."></textarea>
+            </div>
+            
+            <button type="submit" 
+                    class="w-full inline-flex items-center justify-center px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors">
+                <i class="fas fa-qrcode mr-2"></i>
+                Process Scan
+            </button>
+        </form>
+    </div>
+</div>
+
+<!-- Scan Results -->
+<div id="scan-results" class="mt-6 hidden">
+    <h2 class="text-lg font-semibold text-gray-800 mb-4">Scan Results</h2>
+    <div id="results-content"></div>
+</div>
+
+<!-- Recent Scans -->
+<div class="mt-6 bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+    <h2 class="text-lg font-semibold text-gray-800 mb-4">Recent Scans</h2>
+    <div id="recent-scans" class="space-y-2">
+        <!-- Recent scans will be loaded here -->
+    </div>
+</div>
+
+<!-- Action Selection Modal -->
+<div id="action-modal" class="modal hidden">
+    <div class="modal-content" id="modal-content">
+        <h3 class="text-lg font-semibold text-gray-800 mb-4">Select Action</h3>
+        <p class="text-gray-600 mb-4">QR Code detected. What would you like to do?</p>
+        
+        <!-- Quantity input for issue/return actions -->
+        <div id="modal-quantity-container" class="mb-4 hidden">
+            <label for="modal-quantity" class="block text-sm font-medium text-gray-700 mb-2">
+                Quantity
+            </label>
+            <input type="number" 
+                   id="modal-quantity" 
+                   min="1" 
+                   value="1"
+                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                   placeholder="Enter quantity">
+        </div>
+        
+        <div class="grid grid-cols-1 gap-3 mb-4">
+            <button type="button" onclick="performAction('scan')" 
+                    class="flex items-center justify-center px-4 py-3 bg-blue-100 text-blue-800 rounded-lg hover:bg-blue-200 transition-colors">
+                <i class="fas fa-qrcode mr-2"></i>
+                Scan/Track Location
+            </button>
+            <button type="button" onclick="performAction('issue')" 
+                    class="flex items-center justify-center px-4 py-3 bg-green-100 text-green-800 rounded-lg hover:bg-green-200 transition-colors">
+                <i class="fas fa-arrow-up mr-2"></i>
+                Issue Item
+            </button>
+            <button type="button" onclick="performAction('return')" 
+                    class="flex items-center justify-center px-4 py-3 bg-yellow-100 text-yellow-800 rounded-lg hover:bg-yellow-200 transition-colors">
+                <i class="fas fa-arrow-down mr-2"></i>
+                Return Item
+            </button>
+        </div>
+        
+        <button type="button" onclick="closeActionModal()" 
+                class="w-full px-4 py-3 bg-gray-200 text-gray-800 font-medium rounded-lg hover:bg-gray-300 transition-colors">
+            Cancel
+        </button>
+    </div>
+</div>
+
+<!-- Scan Results Modal -->
+<div id="scan-results-modal" class="modal hidden">
+    <div class="modal-content" id="scan-results-content">
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-lg font-semibold text-gray-800">Item Information</h3>
+            <button type="button" onclick="closeScanResultsModal()" 
+                    class="text-gray-500 hover:text-gray-700">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div id="scan-results-details"></div>
+        <div class="mt-6 flex justify-end">
+            <button type="button" onclick="closeScanResultsModal()" 
+                    class="px-6 py-3 bg-gray-200 text-gray-800 font-medium rounded-lg hover:bg-gray-300 transition-colors">
+                Close
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Borrowing Request Modal -->
+<div id="borrowing-request-modal" class="modal hidden">
+    <div class="modal-content" id="borrowing-request-content">
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-lg font-semibold text-gray-800">Borrowing Request Details</h3>
+            <button type="button" onclick="closeBorrowingRequestModal()" 
+                    class="text-gray-500 hover:text-gray-700">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div id="borrowing-request-details"></div>
+    </div>
+</div>
+
+<!-- Return Confirmation Modal -->
+<div id="return-confirmation-modal" class="modal hidden">
+    <div class="modal-content" id="return-confirmation-content">
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-lg font-semibold text-gray-800">Confirm Return</h3>
+            <button type="button" onclick="closeReturnConfirmationModal()" 
+                    class="text-gray-500 hover:text-gray-700">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div id="return-confirmation-details"></div>
+        <div class="mt-6 flex gap-3">
+            <button type="button" onclick="processReturnFromModal()" 
+                    class="flex-1 px-4 py-3 bg-yellow-600 text-white font-medium rounded-lg hover:bg-yellow-700 transition-colors text-center">
+                <i class="fas fa-arrow-down mr-2"></i>Return Item
+            </button>
+            <button type="button" onclick="closeReturnConfirmationModal()" 
+                    class="flex-1 px-4 py-3 bg-gray-200 text-gray-800 font-medium rounded-lg hover:bg-gray-300 transition-colors text-center">
+                Cancel
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+let stream = null;
+let scanning = false;
+let qrCanvas = null;
+let qrContext = null;
+let currentBorrowingRequest = null;
+let currentQRData = null;
+let cameraTimeout = null;
+const CAMERA_TIMEOUT_DURATION = 30000; // 30 seconds
+
+// Update action description when action changes
+document.getElementById('action').addEventListener('change', function() {
+    const description = document.getElementById('action-description');
+    const quantityContainer = document.getElementById('quantity-container');
+    const locationField = document.getElementById('location');
+    
+    switch(this.value) {
+        case 'scan':
+            description.textContent = 'View current location of this supply item';
+            quantityContainer.classList.add('hidden');
+            locationField.placeholder = 'Current location will be displayed';
+            locationField.readOnly = true;
+            break;
+        case 'issue':
+            description.textContent = 'Remove items from stock';
+            quantityContainer.classList.remove('hidden');
+            locationField.placeholder = 'Enter current location';
+            locationField.readOnly = false;
+            break;
+        case 'return':
+            description.textContent = 'Add items to stock';
+            quantityContainer.classList.remove('hidden');
+            locationField.placeholder = 'Enter current location';
+            locationField.readOnly = false;
+            break;
+    }
+});
+
+// Reset camera timeout
+function resetCameraTimeout() {
+    // Clear existing timeout
+    if (cameraTimeout) {
+        clearTimeout(cameraTimeout);
+    }
+    
+    // Set new timeout to stop camera if not used
+    cameraTimeout = setTimeout(() => {
+        if (scanning) {
+            stopCamera();
+            document.getElementById('camera-status').textContent = 'Camera auto-stopped due to inactivity';
+        }
+    }, CAMERA_TIMEOUT_DURATION);
+}
+
+// Start camera
+async function startCamera() {
+    try {
+        // Update status
+        const statusDiv = document.getElementById('camera-status');
+        statusDiv.textContent = 'Accessing camera...';
+        
+        const constraints = {
+            video: {
+                facingMode: 'environment',
+                width: { ideal: 1280 },
+                height: { ideal: 720 }
+            }
+        };
+        
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        
+        const video = document.getElementById('video');
+        const placeholder = document.getElementById('video-placeholder');
+        const overlay = document.getElementById('scanner-overlay');
+        
+        video.srcObject = stream;
+        
+        // Wait for video to be loaded
+        video.onloadedmetadata = function() {
+            video.play().then(() => {
+                video.classList.remove('hidden');
+                placeholder.classList.add('hidden');
+                overlay.classList.remove('hidden');
+                
+                document.getElementById('start-camera').classList.add('hidden');
+                document.getElementById('stop-camera').classList.remove('hidden');
+                statusDiv.textContent = 'Camera active. Point at a QR code to scan.';
+                
+                // Start scanning after a short delay
+                setTimeout(() => {
+                    scanning = true;
+                    scanQRCode();
+                    resetCameraTimeout(); // Start the timeout
+                }, 1000);
+            }).catch(e => {
+                console.error('Error playing video:', e);
+                statusDiv.textContent = 'Error: Could not play video stream';
+                stopCamera();
+            });
+        };
+        
+        video.onerror = function(e) {
+            console.error('Video error:', e);
+            statusDiv.textContent = 'Error: Video stream error';
+            stopCamera();
+        };
+        
+    } catch (error) {
+        console.error('Error accessing camera:', error);
+        document.getElementById('camera-status').textContent = 'Error: ' + (error.name === 'NotAllowedError' ? 'Camera access denied' : 'Camera not available');
+        showNotification('Camera access denied or not available', 'error');
+    }
+}
+
+// Stop camera
+function stopCamera() {
+    scanning = false;
+    
+    // Clear camera timeout
+    if (cameraTimeout) {
+        clearTimeout(cameraTimeout);
+        cameraTimeout = null;
+    }
+    
+    if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+        stream = null;
+    }
+    
+    const video = document.getElementById('video');
+    const placeholder = document.getElementById('video-placeholder');
+    const overlay = document.getElementById('scanner-overlay');
+    
+    video.pause();
+    video.srcObject = null;
+    video.classList.add('hidden');
+    placeholder.classList.remove('hidden');
+    overlay.classList.add('hidden');
+    
+    document.getElementById('start-camera').classList.remove('hidden');
+    document.getElementById('stop-camera').classList.add('hidden');
+    document.getElementById('camera-status').textContent = '';
+}
+
+// Scan QR Code
+function scanQRCode() {
+    if (!scanning) return;
+    
+    const video = document.getElementById('video');
+    if (video.readyState === video.HAVE_ENOUGH_DATA) {
+        // Create canvas if it doesn't exist
+        if (!qrCanvas) {
+            qrCanvas = document.createElement('canvas');
+            qrContext = qrCanvas.getContext('2d');
+        }
+        
+        qrCanvas.width = video.videoWidth;
+        qrCanvas.height = video.videoHeight;
+        qrContext.drawImage(video, 0, 0, qrCanvas.width, qrCanvas.height);
+        
+        const imageData = qrContext.getImageData(0, 0, qrCanvas.width, qrCanvas.height);
+        
+        // Try to decode QR code
+        try {
+            if (typeof jsQR !== 'undefined') {
+                const code = jsQR(imageData.data, imageData.width, imageData.height);
+                
+                if (code) {
+                    // QR code detected
+                    document.getElementById('qr-data').value = code.data;
+                    currentQRData = code.data;
+                    scanning = false;
+                    
+                    // Check if this is a borrowing request QR code
+                    if (code.data.startsWith('BORROW-')) {
+                        // For borrowing QR codes, show borrowing request details
+                        fetchBorrowingRequestInfo();
+                    } else {
+                        // For regular QR codes, automatically fetch and show item information
+                        fetchAndShowItemInfo(code.data);
+                    }
+                    
+                    // Reset camera timeout since we detected a QR code
+                    resetCameraTimeout();
+                    return;
+                }
+            } else {
+                console.error('jsQR library not loaded');
+                document.getElementById('camera-status').textContent = 'Error: QR scanning library not loaded';
+            }
+        } catch (e) {
+            console.error('QR decoding error:', e);
+        }
+    }
+    
+    // Reset camera timeout and continue scanning
+    resetCameraTimeout();
+    setTimeout(scanQRCode, 100);
+}
+
+// Fetch and show item information for regular QR codes
+async function fetchAndShowItemInfo(qrData) {
+    try {
+        const response = await fetch('{% url "process_qr_scan" %}', {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': '{{ csrf_token }}',
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                'qr_data': qrData,
+                'action': 'scan',
+                'location': '',
+                'notes': ''
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            // Check if this is a borrowed item by looking for borrowing_request in the result
+            if (result.borrowing_request) {
+                // This is a borrowing request QR code
+                // Check if the request status is "released" (meaning item is borrowed and needs to be returned)
+                if (result.borrowing_request.status === 'released') {
+                    // Show return confirmation modal for released (borrowed) items
+                    showReturnConfirmationModal(result);
+                } else {
+                    // Show borrowing request details for other statuses
+                    showBorrowingRequestModal(result);
+                }
+            } else {
+                // Check if the item is currently borrowed (using the is_item_borrowed flag from backend)
+                if (result.is_item_borrowed) {
+                    // Show return confirmation modal for borrowed items
+                    showReturnConfirmationModal(result);
+                } else {
+                    // Show regular item info modal with action buttons
+                    showItemInfoModal(result);
+                }
+            }
+            loadRecentScans(); // Refresh recent scans
+        } else {
+            showNotification(result.error || 'Failed to fetch item information', 'error');
+        }
+    } catch (error) {
+        console.error('Error fetching item info:', error);
+        showNotification('Failed to fetch item information', 'error');
+    }
+}
+
+// Check if an item is currently borrowed based on transaction history
+function checkIfBorrowed(transactionHistory) {
+    if (!transactionHistory || transactionHistory.length === 0) {
+        return false;
+    }
+    
+    // Check if the most recent transaction is an "out" transaction (item issued)
+    const latestTransaction = transactionHistory[0];
+    return latestTransaction.transaction_type === 'out';
+}
+
+// Check if an item has been released (borrowed and needs to be returned)
+function checkIfReleased(transactionHistory) {
+    if (!transactionHistory || transactionHistory.length === 0) {
+        return false;
+    }
+    
+    // Check if the most recent transaction is an "out" transaction (item issued/released)
+    const latestTransaction = transactionHistory[0];
+    return latestTransaction.transaction_type === 'out';
+}
+
+// Show return confirmation modal for borrowed items
+function showReturnConfirmationModal(result) {
+    const modal = document.getElementById('return-confirmation-modal');
+    const detailsDiv = document.getElementById('return-confirmation-details');
+    
+    let transactionHistoryHtml = '';
+    if (result.transaction_history && result.transaction_history.length > 0) {
+        transactionHistoryHtml = `
+            <div class="mt-4 pt-4 border-t border-gray-200">
+                <h4 class="font-medium text-gray-700 mb-2">Recent Transactions</h4>
+                <div class="space-y-2 max-h-40 overflow-y-auto">
+                    ${result.transaction_history.map(transaction => `
+                        <div class="flex justify-between text-sm">
+                            <span class="${transaction.transaction_type === 'out' ? 'text-green-600' : 'text-yellow-600'}">
+                                ${transaction.transaction_type === 'out' ? 'Issued' : 'Returned'}
+                            </span>
+                            <span class="font-medium">${Math.abs(transaction.quantity)} units</span>
+                            <span class="text-gray-500">${new Date(transaction.created_at).toLocaleTimeString()}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    }
+    
+    detailsDiv.innerHTML = `
+        <div class="bg-yellow-50 p-4 rounded-lg mb-4">
+            <h4 class="font-medium text-yellow-800 mb-2">Borrowed Item Detected</h4>
+            <div class="flex items-start space-x-4">
+                <div class="flex-shrink-0">
+                    <div class="w-16 h-16 rounded-lg bg-gray-100 flex items-center justify-center">
+                        <i class="fas fa-box text-2xl text-gray-400"></i>
+                    </div>
+                </div>
+                <div class="flex-1">
+                    <h3 class="text-lg font-medium text-gray-900">${result.supply.name}</h3>
+                    <p class="text-sm text-gray-600">Total Stock: ${result.supply.quantity} units</p>
+                    <p class="text-sm text-gray-600">Location: ${result.supply.location}</p>
+                    <p class="text-xs text-gray-500 mt-1">This item is currently borrowed and needs to be returned.</p>
+                </div>
+            </div>
+        </div>
+        ${transactionHistoryHtml}
+        <p class="text-gray-600 text-sm mt-4">
+            <i class="fas fa-info-circle text-yellow-500 mr-1"></i>
+            This item has been released and is currently borrowed. Would you like to process a return?
+        </p>
+    `;
+    
+    // Show the modal
+    modal.classList.remove('hidden');
+}
+
+// Process return action from the return confirmation modal
+function processReturnFromModal() {
+    // Close the return confirmation modal
+    closeReturnConfirmationModal();
+    
+    // Set the action to return in the main form
+    document.getElementById('action').value = 'return';
+    document.getElementById('action').dispatchEvent(new Event('change'));
+    
+    // Focus on location field
+    document.getElementById('location').focus();
+}
+
+// Show item information modal with appropriate action buttons
+function showItemInfoModal(result) {
+    const modal = document.getElementById('scan-results-modal');
+    const detailsDiv = document.getElementById('scan-results-details');
+    
+    // Determine which action buttons to show based on item status
+    let actionButtons = '';
+    
+    // Check if the item is currently borrowed using the is_item_borrowed flag from backend
+    // This is more reliable than checking transaction history
+    const isBorrowed = result.is_item_borrowed || checkIfBorrowed(result.transaction_history);
+    
+    if (isBorrowed) {
+        // If borrowed, show only the Return button
+        actionButtons = `
+            <div class="mt-6">
+                <button type="button" onclick="performModalAction('return')" 
+                        class="w-full px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors">
+                    <i class="fas fa-arrow-down mr-2"></i>Return Item
+                </button>
+            </div>
+        `;
+    } else {
+        // If not borrowed, show both Issue and Return buttons
+        actionButtons = `
+            <div class="mt-6 flex space-x-3">
+                <button type="button" onclick="performModalAction('issue')" 
+                        class="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
+                    <i class="fas fa-arrow-up mr-2"></i>Issue Item
+                </button>
+                <button type="button" onclick="performModalAction('return')" 
+                        class="flex-1 px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors">
+                    <i class="fas fa-arrow-down mr-2"></i>Return Item
+                </button>
+            </div>
+        `;
+    }
+    
+    let transactionHistoryHtml = '';
+    if (result.transaction_history && result.transaction_history.length > 0) {
+        transactionHistoryHtml = `
+            <div class="mt-4 pt-4 border-t border-gray-200">
+                <h4 class="font-medium text-gray-700 mb-2">Recent Transactions</h4>
+                <div class="space-y-2 max-h-40 overflow-y-auto">
+                    ${result.transaction_history.map(transaction => `
+                        <div class="flex justify-between text-sm">
+                            <span class="${transaction.transaction_type === 'out' ? 'text-green-600' : 'text-yellow-600'}">
+                                ${transaction.transaction_type === 'out' ? 'Issued' : 'Returned'}
+                            </span>
+                            <span class="font-medium">${Math.abs(transaction.quantity)} units</span>
+                            <span class="text-gray-500">${new Date(transaction.created_at).toLocaleTimeString()}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    }
+    
+    detailsDiv.innerHTML = `
+        <div class="flex items-start space-x-4">
+            <div class="flex-shrink-0">
+                <div class="w-16 h-16 rounded-lg bg-gray-100 flex items-center justify-center">
+                    <i class="fas fa-box text-2xl text-gray-400"></i>
+                </div>
+            </div>
+            <div class="flex-1">
+                <h3 class="text-lg font-medium text-gray-900">${result.supply.name}</h3>
+                <p class="text-sm text-gray-600">Current Stock: ${result.supply.quantity} units</p>
+                <p class="text-sm text-gray-600">Location: ${result.supply.location}</p>
+                <p class="text-xs text-gray-500 mt-1">${result.message}</p>
+            </div>
+        </div>
+        ${transactionHistoryHtml}
+        ${actionButtons}
+    `;
+    
+    // Show the modal
+    modal.classList.remove('hidden');
+}
+
+// Perform action from modal
+function performModalAction(action) {
+    // Close the current modal
+    closeScanResultsModal();
+    
+    // Set the action in the form
+    document.getElementById('action').value = action === 'release' ? 'issue' : action;
+    document.getElementById('action').dispatchEvent(new Event('change'));
+    
+    // Focus on location field
+    document.getElementById('location').focus();
+}
+
+// Show borrowed item information modal
+function showBorrowedItemInfoModal(result) {
+    const modal = document.getElementById('borrowing-request-modal');
+    const detailsDiv = document.getElementById('borrowing-request-details');
+    
+    // Use the formatted date string directly
+    let requestDate = result.borrowing_request.created_at || 'N/A';
+    
+    detailsDiv.innerHTML = `
+        <div class="bg-blue-50 p-4 rounded-lg mb-4">
+            <h4 class="font-medium text-blue-800 mb-2">Borrowed Item Details</h4>
+            <div class="grid grid-cols-2 gap-2 text-sm">
+                <div class="font-medium">Item:</div>
+                <div>${result.supply.name}</div>
+                
+                <div class="font-medium">Requested by:</div>
+                <div>${result.borrowing_request.user}</div>
+                
+                <div class="font-medium">Quantity:</div>
+                <div>${result.borrowing_request.quantity_requested}</div>
+                
+                <div class="font-medium">Status:</div>
+                <div>
+                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium 
+                        ${result.borrowing_request.status === 'approved' ? 'bg-green-100 text-green-800' : 
+                          result.borrowing_request.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 
+                          'bg-gray-100 text-gray-800'}">
+                        ${result.borrowing_request.status.charAt(0).toUpperCase() + result.borrowing_request.status.slice(1)}
+                    </span>
+                </div>
+                
+                <div class="font-medium">Request Date:</div>
+                <div>${requestDate}</div>
+            </div>
+        </div>
+        
+        <p class="text-gray-600 text-sm">
+            <i class="fas fa-info-circle text-blue-500 mr-1"></i>
+            This QR code is associated with a borrowed item request. You can issue the item to fulfill this request.
+        </p>
+    `;
+    
+    modal.classList.remove('hidden');
+}
+
+// Show borrowing request details modal
+function showBorrowingRequestDetails() {
+    // Fetch borrowing request details
+    fetchBorrowingRequestInfo();
+}
+
+// Fetch borrowing request information
+async function fetchBorrowingRequestInfo() {
+    if (!currentQRData) {
+        showNotification('No QR code data available', 'error');
+        return;
+    }
+    
+    try {
+        const response = await fetch('{% url "process_qr_scan" %}', {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': '{{ csrf_token }}',
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                'qr_data': currentQRData,
+                'action': 'scan',
+                'location': '',
+                'notes': ''
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success && result.borrowing_request) {
+            currentBorrowingRequest = result.borrowing_request;
+            showBorrowingRequestModal(result);
+            loadRecentScans(); // Refresh recent scans
+        } else if (result.success) {
+            // If it's a successful scan but not a borrowing request, show item info
+            showItemInfoModal(result);
+            loadRecentScans(); // Refresh recent scans
+        } else {
+            showNotification(result.error || 'Failed to fetch borrowing request information', 'error');
+        }
+    } catch (error) {
+        console.error('Error fetching borrowing request info:', error);
+        showNotification('Failed to fetch borrowing request information', 'error');
+    }
+}
+
+// Show borrowing request modal
+function showBorrowingRequestModal(result) {
+    const modal = document.getElementById('borrowing-request-modal');
+    const detailsDiv = document.getElementById('borrowing-request-details');
+    
+    // Format the date safely
+    let requestDate = 'N/A';
+    if (result.borrowing_request.created_at) {
+        try {
+            const date = new Date(result.borrowing_request.created_at);
+            if (!isNaN(date.getTime())) {
+                requestDate = date.toLocaleDateString();
+            }
+        } catch (e) {
+            console.error('Error formatting date:', e);
+        }
+    }
+    
+    // Determine the appropriate action based on the borrowing request status
+    let actionButtons = '';
+    let statusMessage = '';
+    
+    if (result.borrowing_request.status === 'released') {
+        // If the item has been released (borrowed), show return option
+        actionButtons = `
+            <div class="mt-6 flex gap-3">
+                <button type="button" onclick="confirmReturnItem()" 
+                        class="flex-1 px-4 py-3 bg-yellow-600 text-white font-medium rounded-lg hover:bg-yellow-700 transition-colors text-center">
+                    <i class="fas fa-arrow-down mr-2"></i>Return Item
+                </button>
+                <button type="button" onclick="closeBorrowingRequestModal()" 
+                        class="flex-1 px-4 py-3 bg-gray-200 text-gray-800 font-medium rounded-lg hover:bg-gray-300 transition-colors text-center">
+                    Cancel
+                </button>
+            </div>
+        `;
+        statusMessage = 'This item has been released and is currently borrowed. You can process a return for this item.';
+    } else if (result.borrowing_request.status === 'approved') {
+        // If the request is approved but not yet released, show issue option
+        actionButtons = `
+            <div class="mt-6 flex gap-3">
+                <button type="button" onclick="confirmIssueItem()" 
+                        class="flex-1 px-4 py-3 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 transition-colors text-center">
+                    <i class="fas fa-arrow-up mr-2"></i>Issue Item
+                </button>
+                <button type="button" onclick="closeBorrowingRequestModal()" 
+                        class="flex-1 px-4 py-3 bg-gray-200 text-gray-800 font-medium rounded-lg hover:bg-gray-300 transition-colors text-center">
+                    Cancel
+                </button>
+            </div>
+        `;
+        statusMessage = 'This borrowing request has been approved. You can issue the item to fulfill this request.';
+    } else {
+        // For other statuses (pending, rejected), show a general message
+        actionButtons = `
+            <div class="mt-6 flex gap-3">
+                <button type="button" onclick="closeBorrowingRequestModal()" 
+                        class="w-full px-4 py-3 bg-gray-200 text-gray-800 font-medium rounded-lg hover:bg-gray-300 transition-colors text-center">
+                    Close
+                </button>
+            </div>
+        `;
+        statusMessage = 'This QR code is associated with a borrowing item request.';
+    }
+    
+    detailsDiv.innerHTML = `
+        <div class="bg-blue-50 p-4 rounded-lg mb-4">
+            <h4 class="font-medium text-blue-800 mb-2">Borrowed Item Details</h4>
+            <div class="grid grid-cols-2 gap-2 text-sm">
+                <div class="font-medium">Item:</div>
+                <div>${result.supply.name}</div>
+                
+                <div class="font-medium">Requested by:</div>
+                <div>${result.borrowing_request.user}</div>
+                
+                <div class="font-medium">Quantity:</div>
+                <div>${result.borrowing_request.quantity_requested}</div>
+                
+                <div class="font-medium">Status:</div>
+                <div>
+                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium 
+                        ${result.borrowing_request.status === 'approved' ? 'bg-green-100 text-green-800' : 
+                          result.borrowing_request.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 
+                          result.borrowing_request.status === 'released' ? 'bg-blue-100 text-blue-800' : 
+                          'bg-gray-100 text-gray-800'}">
+                        ${result.borrowing_request.status.charAt(0).toUpperCase() + result.borrowing_request.status.slice(1)}
+                    </span>
+                </div>
+                
+                <div class="font-medium">Request Date:</div>
+                <div>${requestDate}</div>
+            </div>
+        </div>
+        
+        <p class="text-gray-600 text-sm">
+            <i class="fas fa-info-circle text-blue-500 mr-1"></i>
+            ${statusMessage}
+        </p>
+        ${actionButtons}
+    `;
+    
+    modal.classList.remove('hidden');
+}
+
+// Close action selection modal
+function closeActionModal() {
+    document.getElementById('action-modal').classList.add('hidden');
+    resetCameraTimeout();
+}
+
+// Close borrowing request modal
+function closeBorrowingRequestModal() {
+    document.getElementById('borrowing-request-modal').classList.add('hidden');
+    resetCameraTimeout();
+}
+
+// Close return confirmation modal
+function closeReturnConfirmationModal() {
+    document.getElementById('return-confirmation-modal').classList.add('hidden');
+    resetCameraTimeout();
+}
+
+// Confirm issue item
+async function confirmIssueItem() {
+    // Close the borrowing request modal
+    closeBorrowingRequestModal();
+
+    // If the borrowing request is present, attempt to release it directly
+    if (currentBorrowingRequest) {
+        // If not approved, try to approve first
+        if (currentBorrowingRequest.status !== 'approved') {
+            const ok = await approveBorrowingRequest(currentBorrowingRequest);
+            if (!ok) return;
+        }
+        // Now attempt to release the request (create borrow record)
+        const ok = await releaseBorrowingRequest(currentBorrowingRequest);
+        if (ok) {
+            // Update UI
+            currentBorrowingRequest.status = 'released';
+            showNotification('Borrowing request released and item issued', 'success');
+            loadRecentScans();
+            return;
+        } else {
+            // If release failed (e.g., permission), redirect to approve page as fallback
+            try { window.location.href = '/borrow/approve/' + currentBorrowingRequest.id + '/'; return; } catch (e) {}
+        }
+    }
+
+    // Fallback: show action modal if no borrowing request is present
+    showActionModal();
+}
+
+// Process issuing for a borrowing request: sends issue action and requests
+// the backend mark the borrowing request as released.
+async function processBorrowingIssue(borrowingRequest, quantity = 1, location = '') {
+    // If this is a borrowing request, attempt to release it
+    if (borrowingRequest) {
+        if (borrowingRequest.status !== 'approved') {
+            const ok = await approveBorrowingRequest(borrowingRequest);
+            if (!ok) return;
+        }
+        const ok = await releaseBorrowingRequest(borrowingRequest, quantity, location);
+        if (ok) {
+            currentBorrowingRequest = null;
+            loadRecentScans();
+            return;
+        } else {
+            showNotification('Failed to release borrowing request. Open approve page.', 'error');
+            try { window.location.href = '/borrow/approve/' + borrowingRequest.id + '/'; return; } catch (e) {}
+            return;
+        }
+    }
+
+    // Non-borrowing-request issue flow (legacy): send issue to process_qr_scan
+    try {
+        const payload = {
+            qr_data: currentQRData || '',
+            action: 'issue',
+            quantity: quantity,
+            location: location,
+            notes: ''
+        };
+
+        const response = await fetch('{% url "process_qr_scan" %}', {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': '{{ csrf_token }}',
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            showScanResults(result.supply, 'issue', result.message, result.transaction_history);
+            showNotification(result.message || 'Item issued', 'success');
+            loadRecentScans();
+        } else {
+            showNotification(result.error || 'Failed to issue item', 'error');
+        }
+    } catch (err) {
+        console.error('Error issuing item:', err);
+        showNotification('Failed to process issue', 'error');
+    }
+}
+
+// Release a borrowing request by calling the request_release endpoint
+async function releaseBorrowingRequest(borrowingRequest, quantity = null, location = '') {
+    if (!borrowingRequest) return false;
+    try {
+        const url = '/requests/' + borrowingRequest.id + '/release/';
+        const resp = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': '{{ csrf_token }}',
+                'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: ''
+        });
+
+        if (resp.ok) {
+            showNotification('Request released successfully', 'success');
+            // Update local state if present
+            if (currentBorrowingRequest) currentBorrowingRequest.status = 'released';
+                // If the Borrowed Items list is present on the page, refresh it via HTMX-style request
+                try {
+                    const biResp = await fetch('/borrowed-items/', {
+                        method: 'GET',
+                        headers: {
+                            'HX-Request': 'true'
+                        }
+                    });
+                    if (biResp.ok) {
+                        const html = await biResp.text();
+                        const container = document.getElementById('borrowed-items-list');
+                        if (container) container.innerHTML = html;
+                    }
+                } catch (e) {
+                    // ignore refresh errors
+                }
+            return true;
+        } else if (resp.status === 403) {
+            const text = await resp.text();
+            showNotification('Not authorized to release request: ' + (text || ''), 'error');
+            return false;
+        } else {
+            const text = await resp.text();
+            console.error('Release failed:', resp.status, text);
+            showNotification('Failed to release request', 'error');
+            return false;
+        }
+    } catch (err) {
+        console.error('Error releasing request:', err);
+        showNotification('Failed to release request', 'error');
+        return false;
+    }
+}
+
+// Approve a borrowing request via backend API. Returns true on success.
+async function approveBorrowingRequest(borrowingRequest) {
+    if (!borrowingRequest) return false;
+    try {
+        // POST to the approve view to perform an approve-only action (no release)
+        const url = '/borrow/approve/' + borrowingRequest.id + '/';
+        const body = new URLSearchParams();
+        body.append('action', 'approve');
+
+        const resp = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': '{{ csrf_token }}',
+                'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: body.toString()
+        });
+
+        // The approve view redirects on success — but when called via fetch it will return HTML.
+        // Try to parse JSON if provided; otherwise assume success when status is 200.
+        if (resp.ok) {
+            showNotification('Borrowing request approved', 'success');
+            if (currentBorrowingRequest) currentBorrowingRequest.status = 'approved';
+            borrowingRequest.status = 'approved';
+            return true;
+        } else {
+            const txt = await resp.text();
+            console.error('Approve request failed:', resp.status, txt);
+            showNotification('Failed to approve borrowing request', 'error');
+            return false;
+        }
+    } catch (err) {
+        console.error('Error approving borrowing request:', err);
+        showNotification('Failed to approve borrowing request', 'error');
+        return false;
+    }
+}
+
+// Confirm return item
+function confirmReturnItem() {
+    // Check if we're closing the return confirmation modal or the borrowing request modal
+    const returnModal = document.getElementById('return-confirmation-modal');
+    const borrowingModal = document.getElementById('borrowing-request-modal');
+    
+    // Close whichever modal is currently open
+    if (!returnModal.classList.contains('hidden')) {
+        closeReturnConfirmationModal();
+    }
+    if (!borrowingModal.classList.contains('hidden')) {
+        closeBorrowingRequestModal();
+    }
+    
+    // Set action to return and show the action modal
+    document.getElementById('action').value = 'return';
+    document.getElementById('action').dispatchEvent(new Event('change'));
+    
+    // Pre-fill quantity if available
+    if (currentBorrowingRequest && currentBorrowingRequest.quantity_requested) {
+        document.getElementById('modal-quantity').value = currentBorrowingRequest.quantity_requested;
+        document.getElementById('quantity').value = currentBorrowingRequest.quantity_requested;
+    }
+    
+    // Show action modal
+    showActionModal();
+}
+
+// Perform selected action
+function performAction(action) {
+    // Set the action in the form
+    document.getElementById('action').value = action;
+    
+    // Update the action description
+    const description = document.getElementById('action-description');
+    const quantityContainer = document.getElementById('quantity-container');
+    const modalQuantityContainer = document.getElementById('modal-quantity-container');
+    const locationField = document.getElementById('location');
+    
+    switch(action) {
+        case 'scan':
+            description.textContent = 'View current location of this supply item';
+            quantityContainer.classList.add('hidden');
+            modalQuantityContainer.classList.add('hidden');
+            locationField.placeholder = 'Current location will be displayed';
+            locationField.readOnly = true;
+            break;
+        case 'issue':
+            description.textContent = 'Remove items from stock';
+            quantityContainer.classList.remove('hidden');
+            modalQuantityContainer.classList.remove('hidden');
+            locationField.placeholder = 'Enter current location';
+            locationField.readOnly = false;
+            
+            // If this is a borrowing request QR code, show confirmation
+            if (currentQRData && currentQRData.startsWith('BORROW-')) {
+                // Close the action modal
+                closeActionModal();
+                // Show borrowing request details
+                showBorrowingRequestDetails();
+                return;
+            }
+            break;
+        case 'return':
+            description.textContent = 'Add items to stock';
+            quantityContainer.classList.remove('hidden');
+            modalQuantityContainer.classList.remove('hidden');
+            locationField.placeholder = 'Enter current location';
+            locationField.readOnly = false;
+            
+            // If this is a borrowing request QR code, show confirmation
+            if (currentQRData && currentQRData.startsWith('BORROW-')) {
+                // Close the action modal
+                closeActionModal();
+                // Show return confirmation
+                fetchBorrowingRequestInfo().then(() => {
+                    // After fetching info, show return confirmation
+                    setTimeout(() => {
+                        const modal = document.getElementById('borrowing-request-modal');
+                        if (!modal.classList.contains('hidden')) {
+                            closeBorrowingRequestModal();
+                            showReturnConfirmationModal({supply: {name: 'Item'}});
+                        }
+                    }, 100);
+                });
+                return;
+            }
+            break;
+    }
+    
+    // If action is issue or return, use modal quantity value
+    if (action === 'issue' || action === 'return') {
+        const modalQuantity = document.getElementById('modal-quantity').value;
+        if (modalQuantity && modalQuantity > 0) {
+            document.getElementById('quantity').value = modalQuantity;
+        }
+    }
+    
+    // Close the action modal
+    closeActionModal();
+    
+    // For scan action, fetch and display item information in a modal
+    if (action === 'scan') {
+        fetchScanInfo();
+    } else {
+        // Focus on location field for issue/return actions
+        locationField.focus();
+    }
+}
+
+// Fetch scan information for the scan action
+async function fetchScanInfo() {
+    const qrData = document.getElementById('qr-data').value;
+    if (!qrData.trim()) {
+        showNotification('Please enter QR code data', 'error');
+        return;
+    }
+    
+    try {
+        const response = await fetch('{% url "process_qr_scan" %}', {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': '{{ csrf_token }}',
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                'qr_data': qrData,
+                'action': 'scan',
+                'location': '',
+                'notes': ''
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showScanResultsModal(result.supply, result.transaction_history, result.message);
+        } else {
+            showNotification(result.error || 'Failed to fetch item information', 'error');
+        }
+    } catch (error) {
+        console.error('Error fetching scan info:', error);
+        showNotification('Failed to fetch item information', 'error');
+    }
+}
+
+// Show scan results in a modal
+function showScanResultsModal(supply, transactionHistory, message) {
+    const modal = document.getElementById('scan-results-modal');
+    const detailsDiv = document.getElementById('scan-results-details');
+    
+    let transactionHistoryHtml = '';
+    if (transactionHistory && transactionHistory.length > 0) {
+        transactionHistoryHtml = `
+            <div class="mt-4 pt-4 border-t border-gray-200">
+                <h4 class="font-medium text-gray-700 mb-2">Recent Transactions</h4>
+                <div class="space-y-2 max-h-40 overflow-y-auto">
+                    ${transactionHistory.map(transaction => `
+                        <div class="flex justify-between text-sm">
+                            <span class="${transaction.transaction_type === 'out' ? 'text-green-600' : 'text-yellow-600'}">
+                                ${transaction.transaction_type === 'out' ? 'Issued' : 'Returned'}
+                            </span>
+                            <span class="font-medium">${Math.abs(transaction.quantity)} units</span>
+                            <span class="text-gray-500">${new Date(transaction.created_at).toLocaleTimeString()}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    }
+    
+    detailsDiv.innerHTML = `
+        <div class="flex items-start space-x-4">
+            <div class="flex-shrink-0">
+                <div class="w-16 h-16 rounded-lg bg-gray-100 flex items-center justify-center">
+                    <i class="fas fa-box text-2xl text-gray-400"></i>
+                </div>
+            </div>
+            <div class="flex-1">
+                <h3 class="text-lg font-medium text-gray-900">${supply.name}</h3>
+                <p class="text-sm text-gray-600">Current Stock: ${supply.quantity} units</p>
+                <p class="text-sm text-gray-600">Location: ${supply.location}</p>
+                <p class="text-xs text-gray-500 mt-1">${message}</p>
+            </div>
+        </div>
+        ${transactionHistoryHtml}
+    `;
+    
+    modal.classList.remove('hidden');
+}
+
+// Close scan results modal
+function closeScanResultsModal() {
+    document.getElementById('scan-results-modal').classList.add('hidden');
+    resetCameraTimeout();
+}
+
+// Close scan results modal when clicking outside
+document.getElementById('scan-results-modal').addEventListener('click', function(event) {
+    if (event.target === this) {
+        closeScanResultsModal();
+    }
+});
+
+// Prevent scan results modal from closing when clicking inside
+document.getElementById('scan-results-content').addEventListener('click', function(event) {
+    event.stopPropagation();
+});
+
+// Process manual scan (for issue/return actions)
+async function processManualScan(event) {
+    event.preventDefault();
+    
+    const formElement = document.getElementById('manual-scan-form');
+    const formData = new FormData(formElement);
+    const data = Object.fromEntries(formData.entries());
+    const action = data.action;
+    
+    if (!data.qr_data.trim()) {
+        showNotification('Please enter QR code data', 'error');
+        return;
+    }
+    
+    // Handle Issue/Return actions - location is required
+    if ((action === 'issue' || action === 'return') && !data.location.trim()) {
+        showNotification('Please enter location', 'error');
+        return;
+    }
+    
+    // Include quantity for issue/return actions
+    if (action === 'issue' || action === 'return') {
+        // Get quantity from the form field
+        const quantity = document.getElementById('quantity').value;
+        if (quantity && quantity > 0) {
+            data.quantity = parseInt(quantity);
+        } else {
+            showNotification('Please enter a valid quantity', 'error');
+            return;
+        }
+    }
+    
+    // If this scan corresponds to a borrowing request, handle it specially
+    if (currentBorrowingRequest) {
+        data.borrowing_request_id = currentBorrowingRequest.id;
+        // For issue actions we must NOT release from the scanner. Redirect to approve page.
+        if (action === 'issue') {
+            // Ensure approved first
+            if (currentBorrowingRequest.status !== 'approved') {
+                const ok = await approveBorrowingRequest(currentBorrowingRequest);
+                if (!ok) return;
+            }
+            // Redirect to approve page so the user creates the borrow record there
+            try {
+                window.location.href = '/borrow/approve/' + currentBorrowingRequest.id + '/';
+                return;
+            } catch (e) {
+                // fallback: notify and abort
+                showNotification('Open the approve page to complete issuance', 'info');
+                return;
+            }
+        }
+    }
+
+    
+    
+    try {
+        const response = await fetch('{% url "process_qr_scan" %}', {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': '{{ csrf_token }}',
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(data)
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showScanResults(result.supply, data.action, result.message, result.transaction_history);
+            showNotification(result.message || 'Action processed successfully!', 'success');
+            loadRecentScans(); // Refresh recent scans
+            
+            // Clear form
+            formElement.reset();
+            // Hide quantity container
+            document.getElementById('quantity-container').classList.add('hidden');
+            // Reset location field
+            const locationField = document.getElementById('location');
+            locationField.placeholder = 'Enter current location';
+            locationField.readOnly = false;
+            // If this was a manual issue of a borrowing request, navigate to the approve/create-record page
+            try {
+                if (data.borrowing_request_id) {
+                    window.location.href = '/borrow/approve/' + data.borrowing_request_id + '/';
+                }
+            } catch (e) {}
+        } else {
+            showNotification(result.error || 'Failed to process action', 'error');
+        }
+    } catch (error) {
+        console.error('Error processing action:', error);
+        showNotification('Failed to process action', 'error');
+    }
+}
+
+// Show scan results
+function showScanResults(supply, action, message, transactionHistory = null) {
+    const resultsDiv = document.getElementById('scan-results');
+    const contentDiv = document.getElementById('results-content');
+    
+    // Determine icon and color based on action
+    let iconClass, bgColor, borderColor, textColor;
+    switch(action) {
+        case 'issue':
+            iconClass = 'fa-arrow-up';
+            bgColor = 'bg-green-50';
+            borderColor = 'border-green-200';
+            textColor = 'text-green-800';
+            break;
+        case 'return':
+            iconClass = 'fa-arrow-down';
+            bgColor = 'bg-yellow-50';
+            borderColor = 'border-yellow-200';
+            textColor = 'text-yellow-800';
+            break;
+        default: // scan
+            iconClass = 'fa-qrcode';
+            bgColor = 'bg-blue-50';
+            borderColor = 'border-blue-200';
+            textColor = 'text-blue-800';
+    }
+    
+    let transactionHistoryHtml = '';
+    if (transactionHistory && transactionHistory.length > 0) {
+        transactionHistoryHtml = `
+            <div class="mt-4 pt-4 border-t border-gray-200">
+                <h4 class="font-medium text-gray-700 mb-2">Recent Transactions</h4>
+                <div class="space-y-2 max-h-40 overflow-y-auto">
+                    ${transactionHistory.map(transaction => `
+                        <div class="flex justify-between text-sm">
+                            <span class="${transaction.transaction_type === 'out' ? 'text-green-600' : 'text-yellow-600'}">
+                                ${transaction.transaction_type === 'out' ? 'Issued' : 'Returned'}
+                            </span>
+                            <span class="font-medium">${Math.abs(transaction.quantity)} units</span>
+                            <span class="text-gray-500">${new Date(transaction.created_at).toLocaleTimeString()}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    }
+    
+    contentDiv.innerHTML = `
+        <div class="flex items-start space-x-4 p-4 ${bgColor} rounded-lg border ${borderColor}">
+            <div class="flex-shrink-0">
+                <div class="w-12 h-12 rounded-lg ${bgColor.replace('50', '100')} flex items-center justify-center">
+                    <i class="fas ${iconClass} text-xl ${textColor}"></i>
+                </div>
+            </div>
+            <div class="flex-1">
+                <div class="flex items-start justify-between">
+                    <div>
+                        <h3 class="text-lg font-medium ${textColor}">${supply.name}</h3>
+                        <p class="text-sm text-gray-600">Current Stock: ${supply.quantity} units</p>
+                        <p class="text-sm text-gray-600">Location: ${supply.location}</p>
+                    </div>
+                    <div class="text-right">
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${bgColor.replace('50', '100')} ${textColor}">
+                            ${action.toUpperCase()}
+                        </span>
+                        <p class="text-xs text-gray-500 mt-1">${new Date(supply.timestamp).toLocaleTimeString()}</p>
+                    </div>
+                </div>
+                <p class="text-sm text-gray-700 mt-2">${message}</p>
+                ${transactionHistoryHtml}
+            </div>
+        </div>
+    `;
+    
+    resultsDiv.classList.remove('hidden');
+}
+
+// Load recent scans
+async function loadRecentScans() {
+    try {
+        const response = await fetch('{% url "get_recent_scans" %}', {
+            method: 'GET',
+            headers: {
+                'X-CSRFToken': '{{ csrf_token }}',
+                'Content-Type': 'application/json',
+            }
+        });
+        
+        const result = await response.json();
+        
+        if (result.success && result.recent_scans) {
+            const container = document.getElementById('recent-scans');
+            if (result.recent_scans.length === 0) {
+                container.innerHTML = '<p class="text-gray-500 text-center py-4">No recent scans found</p>';
+                return;
+            }
+            
+            container.innerHTML = result.recent_scans.map(scan => {
+                // Determine icon and color based on action
+                let iconClass, bgColor, textColor;
+                switch(scan.action) {
+                    case 'issue':
+                        iconClass = 'fa-arrow-up';
+                        bgColor = 'bg-green-100';
+                        textColor = 'text-green-800';
+                        break;
+                    case 'return':
+                        iconClass = 'fa-arrow-down';
+                        bgColor = 'bg-yellow-100';
+                        textColor = 'text-yellow-800';
+                        break;
+                    default: // scan
+                        iconClass = 'fa-qrcode';
+                        bgColor = 'bg-blue-100';
+                        textColor = 'text-blue-800';
+                }
+                
+                // Format timestamp
+                let timestamp = 'Unknown time';
+                if (scan.timestamp) {
+                    try {
+                        const date = new Date(scan.timestamp);
+                        if (!isNaN(date.getTime())) {
+                            timestamp = date.toLocaleTimeString();
+                        }
+                    } catch (e) {
+                        console.error('Error formatting timestamp:', e);
+                    }
+                }
+                
+                return `
+                    <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                        <div class="flex items-center space-x-3">
+                            <div class="w-8 h-8 rounded-full flex items-center justify-center ${bgColor} ${textColor}">
+                                <i class="fas ${iconClass} text-sm"></i>
+                            </div>
+                            <div>
+                                <p class="text-sm font-medium text-gray-900">${scan.supply.name}</p>
+                                <p class="text-xs text-gray-500">${scan.scanned_by.username} • ${scan.location}</p>
+                            </div>
+                        </div>
+                        <div class="text-right">
+                            <p class="text-xs text-gray-500">${timestamp}</p>
+                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${bgColor} ${textColor}">
+                                ${scan.action.toUpperCase()}
+                            </span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        } else {
+            document.getElementById('recent-scans').innerHTML = '<p class="text-gray-500 text-center py-4">Failed to load recent scans</p>';
+        }
+    } catch (error) {
+        console.error('Error loading recent scans:', error);
+        document.getElementById('recent-scans').innerHTML = '<p class="text-gray-500 text-center py-4">Failed to load recent scans</p>';
+    }
+}
+
+// Show notification
+function showNotification(message, type = 'info') {
+    // Remove any existing notifications
+    const existingNotification = document.getElementById('notification');
+    if (existingNotification) {
+        existingNotification.remove();
+    }
+    
+    // Create notification element
+    const notification = document.createElement('div');
+    notification.id = 'notification';
+    notification.className = `fixed top-4 right-4 z-50 p-4 rounded-lg shadow-lg transform transition-all duration-300 ${
+        type === 'error' ? 'bg-red-500 text-white' : 
+        type === 'success' ? 'bg-green-500 text-white' : 
+        'bg-blue-500 text-white'
+    }`;
+    notification.innerHTML = `
+        <div class="flex items-center">
+            <i class="fas ${type === 'error' ? 'fa-exclamation-circle' : type === 'success' ? 'fa-check-circle' : 'fa-info-circle'} mr-2"></i>
+            <span>${message}</span>
+            <button onclick="this.parentElement.parentElement.remove()" class="ml-4">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+    `;
+    
+    // Add to document
+    document.body.appendChild(notification);
+    
+    // Auto remove after 5 seconds
+    setTimeout(() => {
+        if (notification.parentElement) {
+            notification.remove();
+        }
+    }, 5000);
+}
+
+// Close modal when clicking outside
+document.getElementById('action-modal').addEventListener('click', function(event) {
+    if (event.target === this) {
+        closeActionModal();
+    }
+});
+
+// Close borrowing request modal when clicking outside
+document.getElementById('borrowing-request-modal').addEventListener('click', function(event) {
+    if (event.target === this) {
+        closeBorrowingRequestModal();
+    }
+});
+
+// Close return confirmation modal when clicking outside
+document.getElementById('return-confirmation-modal').addEventListener('click', function(event) {
+    if (event.target === this) {
+        closeReturnConfirmationModal();
+    }
+});
+
+// Prevent modals from closing when clicking inside
+document.getElementById('modal-content').addEventListener('click', function(event) {
+    event.stopPropagation();
+});
+document.getElementById('borrowing-request-content').addEventListener('click', function(event) {
+    event.stopPropagation();
+});
+document.getElementById('return-confirmation-content').addEventListener('click', function(event) {
+    event.stopPropagation();
+});
+
+// Event listeners
+document.getElementById('start-camera').addEventListener('click', startCamera);
+document.getElementById('stop-camera').addEventListener('click', stopCamera);
+document.getElementById('manual-scan-form').addEventListener('submit', processManualScan);
+
+// Load recent scans on page load
+document.addEventListener('DOMContentLoaded', function() {
+    loadRecentScans();
+    // Set initial action description
+    document.getElementById('action').dispatchEvent(new Event('change'));
+});
+</script>
+{% endblock %}
