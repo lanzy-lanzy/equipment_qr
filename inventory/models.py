@@ -63,6 +63,9 @@ class Supply(models.Model):
     image = models.ImageField(upload_to='supply_images/', blank=True, null=True, help_text="Product image or photo")
     location = models.CharField(max_length=100, default='Main Storage')
     is_consumable = models.BooleanField(default=False, help_text="Check if this item is consumable (e.g., paper, pens). Unchecked means non-consumable (e.g., equipment)")
+    serial_number = models.CharField(max_length=100, blank=True, null=True, help_text="Serial number or code for tracking")
+    date_purchased = models.DateField(blank=True, null=True, help_text="Date when the item was purchased")
+    amount = models.DecimalField(max_digits=12, decimal_places=2, default=0.00, help_text="Total purchase amount")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -237,6 +240,8 @@ class InventoryTransaction(models.Model):
         ('in', 'Stock In'),
         ('out', 'Stock Out'),
         ('adjustment', 'Adjustment'),
+        ('lost', 'Lost Item'),
+        ('damaged', 'Damaged Item'),
     ]
     
     supply = models.ForeignKey(Supply, on_delete=models.CASCADE, related_name='transactions')

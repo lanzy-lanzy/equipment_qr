@@ -169,7 +169,7 @@
                 <!-- Supplies Dropdown - Only for admin and GSO staff -->
                 {% if user.role in 'admin,gso_staff' %}
                 <div
-                    x-data="{ open: {% if request.resolver_match.url_name in 'supply_list,supply_create,supply_detail,category_list,transaction_list' %}true{% else %}false{% endif %} }">
+                    x-data="{ open: {% if request.resolver_match.url_name in 'supply_list,supply_create,supply_detail,category_list,transaction_list,stock_adjustment_list,stock_adjustment_create,stock_adjustment_detail' %}true{% else %}false{% endif %} }">
                     <button @click="open = !open"
                         class="sidebar-item w-full flex items-center justify-between px-4 py-3 rounded-lg transition-all">
                         <div class="flex items-center space-x-3">
@@ -195,6 +195,10 @@
                         <a href="{% url 'transaction_list' %}"
                             class="sidebar-item block px-4 py-2 rounded-lg transition-all text-sm {% if request.resolver_match.url_name == 'transaction_list' %}active{% endif %}">
                             <i class="fas fa-history mr-2"></i>Stock History
+                        </a>
+                        <a href="{% url 'stock_adjustment_list' %}"
+                            class="sidebar-item block px-4 py-2 rounded-lg transition-all text-sm {% if request.resolver_match.url_name in 'stock_adjustment_list,stock_adjustment_create,stock_adjustment_detail' %}active{% endif %}">
+                            <i class="fas fa-tools mr-2"></i>Lost/Damaged Items
                         </a>
                     </div>
                 </div>

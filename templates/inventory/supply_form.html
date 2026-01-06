@@ -362,6 +362,48 @@
             </div>
         </div>
 
+        <!-- Section 6: Purchase Information -->
+        <div class="border-b border-gray-200 p-6 bg-blue-50">
+            <h2 class="text-lg font-semibold text-gray-800 mb-6 flex items-center">
+                <i class="fas fa-receipt text-blue-600 mr-3"></i>
+                Purchase Information
+            </h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div>
+                    <label for="{{ form.serial_number.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-2">
+                        Serial Number
+                    </label>
+                    {{ form.serial_number }}
+                    {% if form.serial_number.errors %}
+                        <p class="mt-1 text-sm text-red-600">{{ form.serial_number.errors.0 }}</p>
+                    {% endif %}
+                    <p class="mt-1 text-xs text-gray-600">Unique identifier for tracking</p>
+                </div>
+
+                <div>
+                    <label for="{{ form.date_purchased.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-2">
+                        Date Purchased
+                    </label>
+                    {{ form.date_purchased }}
+                    {% if form.date_purchased.errors %}
+                        <p class="mt-1 text-sm text-red-600">{{ form.date_purchased.errors.0 }}</p>
+                    {% endif %}
+                    <p class="mt-1 text-xs text-gray-600">When was this item purchased</p>
+                </div>
+
+                <div>
+                    <label for="{{ form.amount.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-2">
+                        Total Purchase Amount (₱)
+                    </label>
+                    {{ form.amount }}
+                    {% if form.amount.errors %}
+                        <p class="mt-1 text-sm text-red-600">{{ form.amount.errors.0 }}</p>
+                    {% endif %}
+                    <p class="mt-1 text-xs text-gray-600">Total cost of purchase</p>
+                </div>
+            </div>
+        </div>
+
         <!-- Form Actions -->
         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-6 bg-gray-50">
             <div class="flex gap-3 flex-1">

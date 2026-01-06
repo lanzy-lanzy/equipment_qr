@@ -2,6 +2,7 @@ from django.urls import path
 from django.contrib.auth import views as auth_views
 from . import views
 from . import analytics_views
+from . import stock_adjustment_views
 
 urlpatterns = [
     # Authentication
@@ -99,4 +100,9 @@ urlpatterns = [
     path('analytics/user/<int:user_id>/modal/', analytics_views.user_analytics_modal, name='user_analytics_modal'),
     path('analytics/most-requested/', analytics_views.most_requested_items, name='most_requested_items'),
     path('analytics/export/<int:user_id>/', analytics_views.export_user_analytics, name='export_user_analytics'),
+    
+    # Stock Adjustments (Lost/Damaged Items)
+    path('stock-adjustments/', stock_adjustment_views.stock_adjustment_list, name='stock_adjustment_list'),
+    path('stock-adjustments/create/', stock_adjustment_views.stock_adjustment_create, name='stock_adjustment_create'),
+    path('stock-adjustments/<int:pk>/', stock_adjustment_views.stock_adjustment_detail, name='stock_adjustment_detail'),
 ]

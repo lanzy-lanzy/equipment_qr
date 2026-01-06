@@ -64,7 +64,7 @@ class SupplyForm(forms.ModelForm):
     
     class Meta:
         model = Supply
-        fields = ['name', 'description', 'category', 'quantity', 'min_stock_level', 'unit', 'cost_per_unit', 'location', 'image', 'supply_type']
+        fields = ['name', 'description', 'category', 'quantity', 'min_stock_level', 'unit', 'cost_per_unit', 'serial_number', 'date_purchased', 'amount', 'location', 'image', 'supply_type']
         widgets = {
             'name': forms.TextInput(attrs={'class': 'form-input', 'placeholder': 'e.g., USB Flash Drive 32GB'}),
             'description': forms.Textarea(attrs={'class': 'form-textarea', 'rows': 3, 'placeholder': 'Describe this supply...'}),
@@ -73,6 +73,9 @@ class SupplyForm(forms.ModelForm):
             'min_stock_level': forms.NumberInput(attrs={'class': 'form-input'}),
             'unit': forms.TextInput(attrs={'class': 'form-input', 'placeholder': 'e.g., pieces, reams, bottles'}),
             'cost_per_unit': forms.NumberInput(attrs={'class': 'form-input', 'step': '0.01'}),
+            'serial_number': forms.TextInput(attrs={'class': 'form-input', 'placeholder': 'e.g., SN123456789'}),
+            'date_purchased': forms.DateInput(attrs={'class': 'form-input', 'type': 'date'}),
+            'amount': forms.NumberInput(attrs={'class': 'form-input', 'step': '0.01', 'placeholder': 'Total purchase amount'}),
             'location': forms.TextInput(attrs={'class': 'form-input'}),
             'image': forms.FileInput(attrs={'class': 'form-input', 'accept': 'image/*'}),
         }
@@ -269,3 +272,42 @@ class UserProfileForm(forms.ModelForm):
             'phone': forms.TextInput(attrs={'class': 'form-input'}),
             'profile_picture': forms.FileInput(attrs={'class': 'form-input', 'accept': 'image/jpeg,image/png'}),
         }
+
+class StockAdjustmentForm(forms.Form):
+    """Form for adjusting stock due to lost or damaged items"""
+    ADJUSTMENT_TYPE_CHOICES = [
+        ('lost', '❌ Lost Item'),
+        ('damaged', '⚠️ Damaged Item'),
+    ]
+    
+    supply = forms.ModelChoiceField(
+        queryset=Supply.objects.all(),
+        widget=forms.Select(attrs={'class': 'form-select'}),
+        label='Supply Item'
+    )
+    
+    adjustment_type = forms.ChoiceField(
+        choices=ADJUSTMENT_TYPE_CHOICES,
+        widget=forms.RadioSelect(attrs={'class': 'form-radio'}),
+        label='Adjustment Type'
+    )
+    
+    quantity = forms.IntegerField(
+        min_value=1,
+        widget=forms.NumberInput(attrs={
+            'class': 'form-input',
+            'min': '1',
+            'placeholder': 'Number of items'
+        }),
+        label='Quantity Affected'
+    )
+    
+    reason = forms.CharField(
+        widget=forms.Textarea(attrs={
+            'class': 'form-textarea',
+            'rows': 4,
+            'placeholder': 'Describe what happened to the item(s)...'
+        }),
+        label='Details',
+        help_text='Please provide details about how the item was lost or damaged'
+    )

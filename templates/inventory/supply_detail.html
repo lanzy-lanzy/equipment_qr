@@ -110,27 +110,67 @@
     <!-- Main Info -->
     <div class="lg:col-span-2 space-y-6">
         <!-- Basic Information -->
-        <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <h2 class="text-lg font-semibold text-gray-800 mb-4">Supply Information</h2>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                    <h3 class="text-sm font-medium text-gray-500 mb-2">Description</h3>
-                    <p class="text-gray-900">{{ supply.description }}</p>
-                </div>
-                <div>
-                    <h3 class="text-sm font-medium text-gray-500 mb-2">Location</h3>
-                    <p class="text-gray-900">{{ supply.location }}</p>
-                </div>
-                <div>
-                    <h3 class="text-sm font-medium text-gray-500 mb-2">Unit</h3>
-                    <p class="text-gray-900">{{ supply.unit }}</p>
-                </div>
-                <div>
-                    <h3 class="text-sm font-medium text-gray-500 mb-2">Cost per Unit</h3>
-                    <p class="text-gray-900">₱{{ supply.cost_per_unit }}</p>
-                </div>
-            </div>
-        </div>
+         <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+             <h2 class="text-lg font-semibold text-gray-800 mb-4">Supply Information</h2>
+             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                 <div>
+                     <h3 class="text-sm font-medium text-gray-500 mb-2">Description</h3>
+                     <p class="text-gray-900">{{ supply.description }}</p>
+                 </div>
+                 <div>
+                     <h3 class="text-sm font-medium text-gray-500 mb-2">Location</h3>
+                     <p class="text-gray-900">{{ supply.location }}</p>
+                 </div>
+                 <div>
+                     <h3 class="text-sm font-medium text-gray-500 mb-2">Unit</h3>
+                     <p class="text-gray-900">{{ supply.unit }}</p>
+                 </div>
+                 <div>
+                     <h3 class="text-sm font-medium text-gray-500 mb-2">Cost per Unit</h3>
+                     <p class="text-gray-900">₱{{ supply.cost_per_unit }}</p>
+                 </div>
+             </div>
+         </div>
+
+         <!-- Purchase Information -->
+         <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+             <h2 class="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+                 <i class="fas fa-receipt text-blue-600 mr-2"></i>
+                 Purchase Information
+             </h2>
+             <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                 <div>
+                     <h3 class="text-sm font-medium text-gray-500 mb-2">Serial Number</h3>
+                     <p class="text-gray-900">
+                         {% if supply.serial_number %}
+                             <code class="px-2 py-1 bg-gray-100 rounded">{{ supply.serial_number }}</code>
+                         {% else %}
+                             <span class="text-gray-400">Not provided</span>
+                         {% endif %}
+                     </p>
+                 </div>
+                 <div>
+                     <h3 class="text-sm font-medium text-gray-500 mb-2">Date Purchased</h3>
+                     <p class="text-gray-900">
+                         {% if supply.date_purchased %}
+                             {{ supply.date_purchased|date:"M d, Y" }}
+                         {% else %}
+                             <span class="text-gray-400">Not provided</span>
+                         {% endif %}
+                     </p>
+                 </div>
+                 <div>
+                     <h3 class="text-sm font-medium text-gray-500 mb-2">Total Purchase Amount</h3>
+                     <p class="text-gray-900">
+                         {% if supply.amount %}
+                             <span class="text-lg font-semibold text-green-600">₱{{ supply.amount }}</span>
+                         {% else %}
+                             <span class="text-gray-400">Not provided</span>
+                         {% endif %}
+                     </p>
+                 </div>
+             </div>
+         </div>
 
         <!-- Stock Information -->
         <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
