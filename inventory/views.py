@@ -568,7 +568,7 @@ def request_detail(request, pk):
         return redirect('request_list')
     
     context = {
-        'request': supply_request,
+        'supply_request': supply_request,
     }
     
     return render(request, 'inventory/request_detail.html', context)

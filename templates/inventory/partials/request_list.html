@@ -87,19 +87,19 @@
                             {% if user.role in 'admin,gso_staff' %}
                             {% if group.status == 'pending' %}
                             <button
-                                onclick="showBulkApproveModal('{{ group.id }}', '{{ group.group_id|default:group.items.0.request_id }}', {% if group.group_id %}true{% else %}false{% endif %})"
+                                onclick="showBulkApproveModal('{{ group.id }}', '{{ group.group_id|default:group.items.0.request_id }}', true)"
                                 class="text-green-600 hover:text-green-900" title="Approve All">
                                 <i class="fas fa-check-double text-lg"></i>
                             </button>
 
                             <button
-                                onclick="showBulkRejectModal('{{ group.id }}', '{{ group.group_id|default:group.items.0.request_id }}', {% if group.group_id %}true{% else %}false{% endif %})"
+                                onclick="showBulkRejectModal('{{ group.id }}', '{{ group.group_id|default:group.items.0.request_id }}', true)"
                                 class="text-red-600 hover:text-red-900" title="Reject All">
                                 <i class="fas fa-times-circle text-lg"></i>
                             </button>
                             {% elif group.status == 'approved' or group.status == 'mixed' %}
                             <button
-                                onclick="showBulkReleaseModal('{{ group.id }}', '{{ group.group_id|default:group.items.0.request_id }}', {% if group.group_id %}true{% else %}false{% endif %})"
+                                onclick="showBulkReleaseModal('{{ group.id }}', '{{ group.group_id|default:group.items.0.request_id }}', true)"
                                 class="text-blue-600 hover:text-blue-900" title="Release Available">
                                 <i class="fas fa-box-open text-lg"></i>
                             </button>

@@ -8,7 +8,7 @@
     <div class="flex flex-col md:flex-row md:items-center md:justify-between">
         <div>
             <h1 class="text-3xl font-bold text-gray-800 mb-2">Request Details</h1>
-            <p class="text-gray-600">View and manage supply request #{{ request.request_id }}</p>
+            <p class="text-gray-600">View and manage supply request #{{ supply_request.request_id }}</p>
         </div>
         <div class="mt-4 md:mt-0 flex space-x-2">
             <a href="{% url 'request_list' %}"
@@ -27,8 +27,8 @@
         <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
             <div class="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
                 <div>
-                    <h2 class="text-xl font-semibold text-gray-800">Request #{{ request.request_id }}</h2>
-                    {% if request.purpose|slice:":12" == "[BORROWING] " %}
+                    <h2 class="text-xl font-semibold text-gray-800">Request #{{ supply_request.request_id }}</h2>
+                    {% if supply_request.purpose|slice:":12" == "[BORROWING] " %}
                     <span
                         class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 mt-2">
                         <i class="fas fa-hand-holding mr-1"></i>
@@ -38,11 +38,11 @@
                 </div>
                 <div class="mt-2 md:mt-0">
                     <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium
-                        {% if request.status == 'pending' %}bg-yellow-100 text-yellow-800
-                        {% elif request.status == 'approved' %}bg-blue-100 text-blue-800
-                        {% elif request.status == 'released' %}bg-green-100 text-green-800
-                        {% elif request.status == 'rejected' %}bg-red-100 text-red-800{% endif %}">
-                        {{ request.get_status_display }}
+                       {% if supply_request.status == 'pending' %}bg-yellow-100 text-yellow-800
+                       {% elif supply_request.status == 'approved' %}bg-blue-100 text-blue-800
+                       {% elif supply_request.status == 'released' %}bg-green-100 text-green-800
+                       {% elif supply_request.status == 'rejected' %}bg-red-100 text-red-800{% endif %}">
+                       {{ supply_request.get_status_display }}
                     </span>
                 </div>
             </div>
@@ -50,50 +50,50 @@
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                     <h3 class="text-sm font-medium text-gray-500 mb-1">Requested By</h3>
-                    <p class="text-lg font-medium text-gray-900">{{ request.user.get_full_name | default:request.user.username }}</p>
-                    <p class="text-sm text-gray-500">{{ request.user.username }}</p>
-                    {% if request.user.department %}
-                    <p class="text-sm text-gray-500">{{ request.user.department }}</p>
+                    <p class="text-lg font-medium text-gray-900">{{ supply_request.user.get_full_name | default:supply_request.user.username }}</p>
+                    <p class="text-sm text-gray-500">{{ supply_request.user.username }}</p>
+                    {% if supply_request.user.department %}
+                    <p class="text-sm text-gray-500">{{ supply_request.user.department }}</p>
                     {% endif %}
                 </div>
 
                 <div>
                     <h3 class="text-sm font-medium text-gray-500 mb-1">Request Date</h3>
-                    <p class="text-lg font-medium text-gray-900">{{ request.created_at|date:"M d, Y" }}</p>
-                    <p class="text-sm text-gray-500">{{ request.created_at|time:"H:i" }}</p>
+                    <p class="text-lg font-medium text-gray-900">{{ supply_request.created_at|date:"M d, Y" }}</p>
+                    <p class="text-sm text-gray-500">{{ supply_request.created_at|time:"H:i" }}</p>
                 </div>
 
                 <div>
                     <h3 class="text-sm font-medium text-gray-500 mb-1">Supply Item</h3>
-                    <p class="text-lg font-medium text-gray-900">{{ request.supply.name }}</p>
-                    <p class="text-sm text-gray-500">{{ request.supply.category.name }}</p>
+                    <p class="text-lg font-medium text-gray-900">{{ supply_request.supply.name }}</p>
+                    <p class="text-sm text-gray-500">{{ supply_request.supply.category.name }}</p>
                 </div>
 
                 <div>
                     <h3 class="text-sm font-medium text-gray-500 mb-1">Quantity</h3>
-                    <p class="text-lg font-medium text-gray-900">{{ request.quantity_requested }} {{ request.supply.unit }}</p>
+                    <p class="text-lg font-medium text-gray-900">{{ supply_request.quantity_requested }} {{ supply_request.supply.unit }}</p>
                 </div>
 
-                {% if request.approved_at %}
+                {% if supply_request.approved_at %}
                 <div>
                     <h3 class="text-sm font-medium text-gray-500 mb-1">Approved By</h3>
-                    <p class="text-lg font-medium text-gray-900">{{ request.approved_by.get_full_name | default:request.approved_by.username }}</p>
-                    <p class="text-sm text-gray-500">{{ request.approved_at|date:"M d, Y" }} at {{ request.approved_at|time:"H:i" }}</p>
+                    <p class="text-lg font-medium text-gray-900">{{ supply_request.approved_by.get_full_name | default:supply_request.approved_by.username }}</p>
+                    <p class="text-sm text-gray-500">{{ supply_request.approved_at|date:"M d, Y" }} at {{ supply_request.approved_at|time:"H:i" }}</p>
                 </div>
                 {% endif %}
 
-                {% if request.released_at %}
+                {% if supply_request.released_at %}
                 <div>
                     <h3 class="text-sm font-medium text-gray-500 mb-1">Released By</h3>
-                    <p class="text-lg font-medium text-gray-900">{{ request.released_by.get_full_name | default:request.released_by.username }}</p>
-                    <p class="text-sm text-gray-500">{{ request.released_at|date:"M d, Y" }} at {{ request.released_at|time:"H:i" }}</p>
+                    <p class="text-lg font-medium text-gray-900">{{ supply_request.released_by.get_full_name | default:supply_request.released_by.username }}</p>
+                    <p class="text-sm text-gray-500">{{ supply_request.released_at|date:"M d, Y" }} at {{ supply_request.released_at|time:"H:i" }}</p>
                 </div>
                 {% endif %}
 
-                {% if request.rejected_reason %}
+                {% if supply_request.rejected_reason %}
                 <div class="md:col-span-2">
                     <h3 class="text-sm font-medium text-gray-500 mb-1">Rejection Reason</h3>
-                    <p class="text-lg font-medium text-gray-900">{{ request.rejected_reason }}</p>
+                    <p class="text-lg font-medium text-gray-900">{{ supply_request.rejected_reason }}</p>
                 </div>
                 {% endif %}
             </div>
@@ -104,22 +104,22 @@
     <div>
         <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
             <h3 class="text-lg font-semibold text-gray-800 mb-3">Purpose</h3>
-            {% if request.purpose|slice:":12" == "[BORROWING] " %}
-            <p class="text-gray-700">{{ request.purpose|slice:"12:" }}</p>
+            {% if supply_request.purpose|slice:":12" == "[BORROWING] " %}
+            <p class="text-gray-700">{{ supply_request.purpose|slice:"12:" }}</p>
             {% else %}
-            <p class="text-gray-700">{{ request.purpose }}</p>
+            <p class="text-gray-700">{{ supply_request.purpose }}</p>
             {% endif %}
         </div>
 
-        {% if request.notes %}
+        {% if supply_request.notes %}
         <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
             <h3 class="text-lg font-semibold text-gray-800 mb-3">Notes</h3>
-            <p class="text-gray-700">{{ request.notes }}</p>
+            <p class="text-gray-700">{{ supply_request.notes }}</p>
         </div>
         {% endif %}
 
         <!-- Borrowing Request Instructions -->
-        {% if request.purpose|slice:":12" == "[BORROWING] " and request.status == 'approved' %}
+        {% if supply_request.purpose|slice:":12" == "[BORROWING] " and supply_request.status == 'approved' %}
         <div class="bg-blue-50 border-l-4 border-blue-400 p-4 rounded">
             <div class="flex">
                 <div class="flex-shrink-0">
@@ -130,13 +130,13 @@
                     <div class="mt-2 text-sm text-blue-700">
                         <p>Your borrowing request has been approved!</p>
                         <p class="mt-1">Go to the GSO counter and use the QR scanner to collect your item.</p>
-                        {% if request.borrowing_qr_code %}
+                        {% if supply_request.borrowing_qr_code %}
                         <div class="mt-3">
                             <p class="font-medium">Your Borrowing QR Code:</p>
-                            <img id="borrowing-qr-img" src="{{ request.borrowing_qr_code.url }}" alt="Borrowing QR Code"
+                            <img id="borrowing-qr-img" src="{{ supply_request.borrowing_qr_code.url }}" alt="Borrowing QR Code"
                                 class="mt-2 max-w-full h-auto">
                             <div class="mt-3 flex items-center space-x-2">
-                                <a href="{{ request.borrowing_qr_code.url }}" download="qr-{{ request.request_id }}.png"
+                                <a href="{{ supply_request.borrowing_qr_code.url }}" download="qr-{{ supply_request.request_id }}.png"
                                     class="inline-flex items-center px-3 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors">
                                     <i class="fas fa-download mr-2"></i>
                                     Download QR Code
@@ -161,8 +161,8 @@
     <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div>
             <h3 class="text-sm font-medium text-gray-500 mb-1">Total Stock</h3>
-            <p class="text-2xl font-bold text-gray-900">{{ request.supply.quantity }} {{ request.supply.unit }}</p>
-            {% if request.supply.is_low_stock %}
+            <p class="text-2xl font-bold text-gray-900">{{ supply_request.supply.quantity }} {{ supply_request.supply.unit }}</p>
+            {% if supply_request.supply.is_low_stock %}
             <span
                 class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 mt-1">
                 <i class="fas fa-exclamation-triangle mr-1"></i>
@@ -173,18 +173,18 @@
 
         <div>
             <h3 class="text-sm font-medium text-gray-500 mb-1">Minimum Stock Level</h3>
-            <p class="text-2xl font-bold text-gray-900">{{ request.supply.min_stock_level }} {{ request.supply.unit }}
+            <p class="text-2xl font-bold text-gray-900">{{ supply_request.supply.min_stock_level }} {{ supply_request.supply.unit }}
             </p>
         </div>
 
         <div>
             <h3 class="text-sm font-medium text-gray-500 mb-1">Location</h3>
-            <p class="text-lg font-medium text-gray-900">{{ request.supply.location }}</p>
+            <p class="text-lg font-medium text-gray-900">{{ supply_request.supply.location }}</p>
         </div>
     </div>
 
     <div class="mt-4 pt-4 border-t border-gray-200">
-        <a href="{% url 'supply_detail' request.supply.pk %}"
+        <a href="{% url 'supply_detail' supply_request.supply.pk %}"
             class="inline-flex items-center text-indigo-600 hover:text-indigo-800 text-sm font-medium">
             <i class="fas fa-eye mr-1"></i>
             View Supply Details
@@ -239,14 +239,14 @@
 <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
     <h2 class="text-xl font-semibold text-gray-800 mb-4">Actions</h2>
 
-    {% if request.status == 'pending' %}
+    {% if supply_request.status == 'pending' %}
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <form method="post" action="{% url 'request_approve' request.pk %}">
+        <form method="post" action="{% url 'request_approve' supply_request.pk %}">
             {% csrf_token %}
             <button type="submit"
                 class="w-full inline-flex items-center justify-center px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors">
                 <i class="fas fa-check mr-2"></i>
-                {% if request.purpose|slice:":12" == "[BORROWING] " %}
+                {% if supply_request.purpose|slice:":12" == "[BORROWING] " %}
                 Approve Borrow Request
                 {% else %}
                 Approve Request
@@ -261,7 +261,7 @@
         </button>
     </div>
 
-    {% if request.purpose|slice:":12" == "[BORROWING] " and request.status == 'approved' %}
+    {% if supply_request.purpose|slice:":12" == "[BORROWING] " and supply_request.status == 'approved' %}
     <div class="mt-4 p-4 bg-blue-50 rounded-lg">
         <div class="flex">
             <div class="flex-shrink-0">
@@ -276,8 +276,8 @@
         </div>
     </div>
     {% endif %}
-    {% elif request.status == 'approved' and not request.purpose|slice:":12" == "[BORROWING] " %}
-    <form method="post" action="{% url 'request_release' request.pk %}">
+    {% elif supply_request.status == 'approved' and not supply_request.purpose|slice:":12" == "[BORROWING] " %}
+    <form method="post" action="{% url 'request_release' supply_request.pk %}">
         {% csrf_token %}
         <button type="submit"
             class="inline-flex items-center px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors">
@@ -285,7 +285,7 @@
             Release Supply
         </button>
     </form>
-    {% elif request.status == 'approved' and request.purpose|slice:":12" == "[BORROWING] " %}
+    {% elif supply_request.status == 'approved' and supply_request.purpose|slice:":12" == "[BORROWING] " %}
     <div class="p-4 bg-blue-50 rounded-lg">
         <div class="flex">
             <div class="flex-shrink-0">
@@ -300,13 +300,13 @@
         </div>
     </div>
 
-    {% if request.borrowing_qr_code %}
+    {% if supply_request.borrowing_qr_code %}
     <div class="mt-4 p-4 bg-white border border-gray-200 rounded-lg">
         <h3 class="text-sm font-medium text-gray-800 mb-2">Borrowing QR Code</h3>
-        <img id="borrow-qr-img-actions" src="{{ request.borrowing_qr_code.url }}" alt="Borrowing QR Code"
+        <img id="borrow-qr-img-actions" src="{{ supply_request.borrowing_qr_code.url }}" alt="Borrowing QR Code"
             class="max-w-full h-auto">
         <div class="mt-3">
-            <a href="{{ request.borrowing_qr_code.url }}" download="qr-{{ request.request_id }}.png"
+            <a href="{{ supply_request.borrowing_qr_code.url }}" download="qr-{{ supply_request.request_id }}.png"
                 class="inline-flex items-center px-3 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors">
                 <i class="fas fa-download mr-2"></i>
                 Download QR Code
@@ -330,7 +330,7 @@
             </button>
         </div>
 
-        <form method="post" action="{% url 'request_reject' request.pk %}">
+        <form method="post" action="{% url 'request_reject' supply_request.pk %}">
             {% csrf_token %}
             <div class="mb-4">
                 <label for="reason" class="block text-sm font-medium text-gray-700 mb-2">Reason for Rejection *</label>
