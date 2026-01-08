@@ -186,6 +186,48 @@ def get_user_overdue_items(user):
     ).select_related('supply')
 
 
+def ensure_overdue_notifications():
+    """
+    Create in-app overdue notifications for admin/GSO users for borrowed items
+    that are past their return deadline. This is idempotent
+    and will not create duplicate unread notifications for the same borrow instance.
+    """
+    overdue_items = BorrowedItem.objects.filter(
+        returned_at__isnull=True,
+        return_deadline__isnull=False,
+        return_deadline__lt=timezone.now().date()
+    ).select_related('borrower', 'supply')
+    
+    recipients = User.objects.filter(role__in=['admin', 'gso_staff'])
+
+    for item in overdue_items:
+        title = f"Overdue Item: {item.supply.name}"
+        msg = f"Item '{item.supply.name}' borrowed by {item.borrower.username} is overdue (Due: {item.return_deadline})."
+        
+        for recipient in recipients:
+            # Check if THIS recipient already has an unread notification for this specific overdue item
+            # We use the message to distinguish different overdue items
+            exists_unread = Notification.objects.filter(
+                recipient=recipient, 
+                title=title,
+                message=msg,
+                is_read=False
+            ).exists()
+            
+            if not exists_unread:
+                try:
+                    Notification.objects.create(
+                        recipient=recipient,
+                        title=title,
+                        message=msg,
+                        url=f"/borrowed-items/?status=overdue",
+                        level='error'
+                    )
+                except Exception:
+                    continue
+    return True
+
+
 def ensure_low_stock_notifications():
     """
     Create in-app low-stock notifications for admin/GSO users for supplies
@@ -218,5 +260,4 @@ def ensure_low_stock_notifications():
                     )
                 except Exception:
                     continue
-    return True
     return True

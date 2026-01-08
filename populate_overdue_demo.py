@@ -48,9 +48,10 @@ def populate_overdue_demo_data():
             supply=supply,
             borrower=department_user,
             borrowed_quantity=1,
+            borrowed_date=timezone.now().date() - timedelta(days=5),
             location_when_borrowed="Main Office",
             notes="Demo overdue item for testing",
-            return_deadline=timezone.now() - timedelta(days=2)  # 2 days overdue
+            return_deadline=timezone.now().date() - timedelta(days=2)  # 2 days overdue
         )
         print(f"Created overdue item: {overdue_item.supply.name} (ID: {overdue_item.id})")
         print(f"  - Borrowed by: {overdue_item.borrower.username}")
@@ -66,9 +67,10 @@ def populate_overdue_demo_data():
             supply=supply,
             borrower=department_user,
             borrowed_quantity=1,
+            borrowed_date=timezone.now().date() - timedelta(days=2),
             location_when_borrowed="Storage Room",
             notes="Demo item due soon for testing",
-            return_deadline=timezone.now() + timedelta(days=1)  # Due tomorrow
+            return_deadline=timezone.now().date() + timedelta(days=1)  # Due tomorrow
         )
         print(f"Created due soon item: {due_soon_item.supply.name} (ID: {due_soon_item.id})")
         print(f"  - Borrowed by: {due_soon_item.borrower.username}")
@@ -84,11 +86,12 @@ def populate_overdue_demo_data():
             supply=supply,
             borrower=department_user,
             borrowed_quantity=1,
+            borrowed_date=timezone.now().date() - timedelta(days=4),
             location_when_borrowed="Reception",
             location_when_returned="Storage",
             returned_at=timezone.now() - timedelta(days=1),  # Returned 1 day ago
             notes="Demo returned item for testing",
-            return_deadline=timezone.now() + timedelta(days=3)  # Was due in future
+            return_deadline=timezone.now().date() + timedelta(days=3)  # Was due in future
         )
         print(f"Created returned item: {returned_item.supply.name} (ID: {returned_item.id})")
         print(f"  - Borrowed by: {returned_item.borrower.username}")

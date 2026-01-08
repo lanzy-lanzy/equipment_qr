@@ -38,7 +38,7 @@ from .forms import (
     SupplyCategoryForm, QRScanForm, BorrowedItemForm, BorrowRequestForm
 )
 from .forms import UserProfileForm
-from .utils import check_low_stock_alerts, has_overdue_items, get_user_overdue_items, ensure_low_stock_notifications
+from .utils import check_low_stock_alerts, has_overdue_items, get_user_overdue_items, ensure_low_stock_notifications, ensure_overdue_notifications
 from django.views.decorators.http import require_POST
 
 
@@ -108,6 +108,7 @@ def dashboard(request):
     # Proactively check for low stock items and notify staff
     if user.role in ['admin', 'gso_staff']:
         ensure_low_stock_notifications()
+        ensure_overdue_notifications()
 
     context = {
         'user': user,
@@ -122,6 +123,7 @@ def dashboard(request):
         context['recent_requests'] = SupplyRequest.objects.order_by('-created_at')[:10]
         context['low_stock_items'] = Supply.objects.filter(quantity__lte=F('min_stock_level'))[:10]
         context['recently_borrowed'] = BorrowedItem.objects.filter(returned_at__isnull=True).order_by('-borrowed_at')[:10]
+        context['overdue_items_list'] = BorrowedItem.objects.filter(returned_at__isnull=True, return_deadline__lt=timezone.now().date()).order_by('return_deadline')[:10]
     elif user.role == 'gso_staff':
         context['total_requests'] = SupplyRequest.objects.count()
         context['pending_requests_count'] = SupplyRequest.objects.filter(status='pending').count()
@@ -129,6 +131,7 @@ def dashboard(request):
         context['recent_approvals'] = SupplyRequest.objects.filter(approved_by=user).order_by('-approved_at')[:5]
         context['low_stock_items'] = Supply.objects.filter(quantity__lte=F('min_stock_level'))[:10]
         context['recently_borrowed'] = BorrowedItem.objects.filter(returned_at__isnull=True).order_by('-borrowed_at')[:10]
+        context['overdue_items_list'] = BorrowedItem.objects.filter(returned_at__isnull=True, return_deadline__lt=timezone.now().date()).order_by('return_deadline')[:10]
     else:  # department_user
         # For department users, only show their own requests
         user_requests = SupplyRequest.objects.filter(user=user)
@@ -2381,6 +2384,10 @@ def borrowed_items_list(request):
     """
     user = request.user
     
+    # Proactively check for overdue items and notify staff
+    if user.role in ['admin', 'gso_staff']:
+        ensure_overdue_notifications()
+    
     # For admin and GSO staff, show all borrowed items
     # For department users, show only their borrowed items
     if user.role in ['admin', 'gso_staff']:
@@ -2394,6 +2401,12 @@ def borrowed_items_list(request):
         borrowed_items = borrowed_items.filter(returned_at__isnull=False)
     elif status_filter == 'borrowed':
         borrowed_items = borrowed_items.filter(returned_at__isnull=True)
+    elif status_filter == 'overdue':
+        borrowed_items = borrowed_items.filter(
+            returned_at__isnull=True,
+            return_deadline__isnull=False,
+            return_deadline__lt=timezone.now().date()
+        )
     
     # Search functionality
     search = request.GET.get('search', '')

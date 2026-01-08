@@ -48,6 +48,7 @@
                     hx-target="#borrowed-items-list"
                     hx-include="[name='search']">
                 <option value="">All Items</option>
+                <option value="overdue" {% if status_filter == 'overdue' %}selected{% endif %}>Overdue</option>
                 <option value="borrowed" {% if status_filter == 'borrowed' %}selected{% endif %}>Currently Borrowed</option>
                 <option value="returned" {% if status_filter == 'returned' %}selected{% endif %}>Returned</option>
             </select>
