@@ -274,7 +274,18 @@ function renderSmartModal(result) {
         const itemName = result.supply ? result.supply.name : (result.borrowing_request ? result.borrowing_request.supply_name : 'Item');
         const status = result.borrowing_request ? result.borrowing_request.status : (result.is_item_borrowed ? 'released' : 'available');
         
-        title.innerText = itemName;
+        // Change title based on whether it's an active request or a generic supply scan
+        if (result.borrowing_request) {
+            title.innerText = 'Individual Request Summary';
+            body.innerHTML = `
+                <div class="bg-indigo-50 rounded-2xl p-4 mb-4">
+                    <p class="text-indigo-800 font-semibold mb-1">Request from ${result.user}</p>
+                    <p class="text-xs text-indigo-600">ID: ${result.borrowing_request.request_id}</p>
+                </div>
+            `;
+        } else {
+            title.innerText = 'Supply Item Detail';
+        }
         
         let statusBadge = '';
         let mainAction = '';
@@ -294,24 +305,24 @@ function renderSmartModal(result) {
             `;
         }
 
-        body.innerHTML = `
+        body.innerHTML += `
             <div class="flex items-center gap-4 mb-6">
                 <div class="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center text-2xl text-slate-400">
                     <i class="fas fa-box"></i>
                 </div>
                 <div>
                     <h4 class="text-lg font-bold text-slate-800">${itemName}</h4>
-                    ${statusBadge}
+                    <div class="mt-1">${statusBadge}</div>
                 </div>
             </div>
             <div class="grid grid-cols-2 gap-4 text-sm bg-slate-50 rounded-2xl p-4">
                 <div>
-                    <p class="text-slate-400 font-medium">Quantity</p>
-                    <p class="text-slate-900 font-bold">${result.borrowing_request ? result.borrowing_request.quantity_requested : (result.supply ? result.supply.quantity : '1')}</p>
+                    <p class="text-slate-400 font-medium">${result.borrowing_request ? 'Requested Quantity' : 'Available Stock'}</p>
+                    <p class="text-slate-900 font-bold text-lg">${result.borrowing_request ? result.borrowing_request.quantity_requested : result.supply.quantity}</p>
                 </div>
                 <div>
-                    <p class="text-slate-400 font-medium">Requester</p>
-                    <p class="text-slate-900 font-bold">${result.user || 'N/A'}</p>
+                    <p class="text-slate-400 font-medium">${result.borrowing_request ? 'Requested By' : 'Location'}</p>
+                    <p class="text-slate-900 font-bold text-lg">${result.borrowing_request ? (result.user || 'N/A') : (result.supply.location || 'Storage')}</p>
                 </div>
             </div>
         `;
@@ -330,7 +341,7 @@ async function executeAction(action) {
     let payload = {};
     
     const qrData = lastResult.is_batch ? currentQRData : (lastResult.borrowing_request ? currentQRData : (lastResult.supply ? lastResult.supply.id : currentQRData ));
-    const groupId = currentQRData.replace('BORROW-BATCH-', '');
+    const groupId = currentQRData.split('BATCH-').pop();
 
     if (action === 'batch_release') {
         url = `/requests/bulk/${groupId}/release/`;
@@ -361,9 +372,13 @@ async function executeAction(action) {
         
         if (result.success || response.ok) {
             showNotification('Transaction completed successfully', 'success');
-            loadRecentScans();
+            // Allow time for the notification to be seen before reloading
+            setTimeout(() => {
+                location.reload();
+            }, 800);
         } else {
             showNotification(result.error || 'Action failed', 'error');
+            scanning = true; // Resume scanning if it failed
         }
     } catch (err) {
         showNotification('Operation failed', 'error');
@@ -382,18 +397,27 @@ async function loadRecentScans() {
         const resp = await fetch('{% url "get_recent_scans" %}');
         const data = await resp.json();
         if (data.success) {
-            container.innerHTML = data.recent_scans.map(s => `
-                <div class="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100">
-                    <div class="w-10 h-10 rounded-lg ${s.action === 'issue' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'} flex items-center justify-center">
-                        <i class="fas ${s.action === 'issue' ? 'fa-arrow-up' : 'fa-arrow-down'} text-sm"></i>
-                    </div>
-                    <div class="flex-1">
-                        <p class="text-sm font-bold text-slate-800">${s.supply.name}</p>
-                        <p class="text-[10px] text-slate-400 font-bold uppercase">${s.action} • ${s.scanned_by.username}</p>
-                    </div>
-                    <p class="text-[10px] font-bold text-slate-400">${new Date(s.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
-                </div>
-            `).join('');
+                container.innerHTML = data.recent_scans.map(s => {
+                    const mainItem = s.items[0];
+                    const count = s.items.length;
+                    const itemsList = s.items.map(i => i.name).join(', ');
+                    
+                    return `
+                        <div class="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100" title="${itemsList}">
+                            <div class="w-10 h-10 rounded-lg ${s.action === 'issue' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'} flex items-center justify-center">
+                                <i class="fas ${s.action === 'issue' ? 'fa-arrow-up' : 'fa-arrow-down'} text-sm"></i>
+                            </div>
+                            <div class="flex-1 overflow-hidden">
+                                <div class="flex items-center gap-2">
+                                    <p class="text-sm font-bold text-slate-800 truncate">${mainItem.name}${count > 1 ? ' + ' + (count - 1) + ' more' : ''}</p>
+                                    ${s.is_batch ? '<span class="px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 text-[8px] font-black uppercase">Batch</span>' : ''}
+                                </div>
+                                <p class="text-[10px] text-slate-400 font-bold uppercase">${s.action} • ${s.scanned_by.username}</p>
+                            </div>
+                            <p class="text-[10px] font-bold text-slate-400 whitespace-nowrap">${new Date(s.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                        </div>
+                    `;
+                }).join('');
         }
     } catch (e) {}
 }

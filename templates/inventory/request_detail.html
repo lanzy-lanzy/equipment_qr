@@ -5,6 +5,24 @@
 {% endblock %}
 
 {% block content %}
+<style>
+    .qr-zoom-container {
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        cursor: zoom-in;
+    }
+    .qr-zoom-container:hover {
+        transform: scale(1.05);
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+    }
+    .zoom-modal-backdrop {
+        background-color: rgba(0, 0, 0, 0.8);
+        backdrop-filter: blur(8px);
+        transition: opacity 0.3s ease;
+    }
+    .zoom-modal-content {
+        transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+</style>
 <!-- Page Header -->
 <div class="mb-8">
     <div class="flex flex-col md:flex-row md:items-center md:justify-between">
@@ -132,7 +150,7 @@
                 <h3 class="font-bold text-lg mb-4 flex items-center">
                     <i class="fas fa-qrcode mr-2"></i> Unified QR Code
                 </h3>
-                <div class="bg-white p-4 rounded-xl mb-4">
+                <div class="bg-white p-4 rounded-xl mb-4 qr-zoom-container" onclick="openZoomModal('{{ supply_request.borrowing_qr_code.url }}')">
                     <img id="batch-qr-img" src="{{ supply_request.borrowing_qr_code.url }}" alt="Batch QR Code" class="w-full h-auto rounded-lg">
                 </div>
                 <div class="space-y-3">
@@ -241,7 +259,7 @@
             {% if supply_request.borrowing_qr_code %}
             <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 text-center">
                 <h3 class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-6">Borrowing QR Code</h3>
-                <div class="bg-gray-50 p-6 rounded-3xl mx-auto mb-6 inline-block">
+                <div class="bg-gray-50 p-6 rounded-3xl mx-auto mb-6 inline-block qr-zoom-container" onclick="openZoomModal('{{ supply_request.borrowing_qr_code.url }}')">
                     <img src="{{ supply_request.borrowing_qr_code.url }}" alt="QR" class="w-32 h-32 mx-auto">
                 </div>
                 <a href="{{ supply_request.borrowing_qr_code.url }}" download="qr-{{ supply_request.request_id }}.png"
@@ -348,7 +366,37 @@
     </div>
 </div>
 
+<!-- QR Zoom Modal -->
+<div id="qr-zoom-modal" class="fixed inset-0 z-[100] hidden flex items-center justify-center p-4 zoom-modal-backdrop" onclick="closeZoomModal()">
+    <div class="relative max-w-2xl w-full flex flex-col items-center">
+        <button class="absolute -top-12 right-0 text-white text-3xl hover:text-gray-300 transition-colors">
+            <i class="fas fa-times"></i>
+        </button>
+        <div class="zoom-modal-content bg-white p-8 rounded-3xl shadow-2xl">
+            <img id="zoomed-qr-img" src="" alt="Zoomed QR" class="max-w-full h-auto rounded-xl">
+            <p class="mt-6 text-center text-gray-500 font-bold uppercase tracking-widest text-xs">Scan or Download to Process</p>
+        </div>
+    </div>
+</div>
+
 <script>
+    function openZoomModal(url) {
+        document.getElementById('zoomed-qr-img').src = url;
+        const modal = document.getElementById('qr-zoom-modal');
+        modal.classList.remove('hidden');
+        setTimeout(() => {
+            modal.querySelector('.zoom-modal-content').style.transform = 'scale(1)';
+        }, 10);
+    }
+
+    function closeZoomModal() {
+        const modal = document.getElementById('qr-zoom-modal');
+        modal.querySelector('.zoom-modal-content').style.transform = 'scale(0.9)';
+        setTimeout(() => {
+            modal.classList.add('hidden');
+        }, 200);
+    }
+
     function showRejectModal() {
         document.getElementById('reject-modal').classList.remove('hidden');
     }

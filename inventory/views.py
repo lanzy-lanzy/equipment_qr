@@ -532,6 +532,10 @@ def request_create(request):
             supply_request = form.save(commit=False)
             supply_request.user = request.user
             supply_request.save()
+            
+            # Generate QR code for the request
+            supply_request.generate_borrowing_qr_code()
+            
             messages.success(request, f'Request {supply_request.request_id} created successfully.')
             return redirect('request_detail', pk=supply_request.pk)
     else:
@@ -764,6 +768,16 @@ def request_release(request, pk):
         reason=f"Released for request {supply_request.request_id}",
         performed_by=request.user
     )
+
+    # Log the scan for the scanner's recent transmissions list
+    from .models import QRScanLog
+    QRScanLog.objects.create(
+        supply=supply_request.supply,
+        scanned_by=request.user,
+        action='issue',
+        location=supply_request.supply.location or '',
+        notes=f"Released via request detail/scanner (REQ: {supply_request.request_id})"
+    )
     
     if request.htmx:
         messages.success(request, f'Request {supply_request.request_id} released successfully.')
@@ -782,34 +796,63 @@ def qr_scanner(request):
 
 @login_required
 def get_recent_scans(request):
-    """API endpoint to fetch recent QR scans for the current user"""
+    """API endpoint to fetch recent QR scans for the current user, grouped by batch"""
     try:
-        # Get recent scans for the current user, limited to 10
+        import re
+        # Get more records to allow for grouping and still return a decent list
         recent_scans = QRScanLog.objects.filter(
             scanned_by=request.user
         ).select_related(
             'supply', 'scanned_by'
-        ).order_by('-timestamp')[:10]
+        ).order_by('-timestamp')[:40]
         
-        # Format the data for JSON response
-        scans_data = []
+        grouped_data = []
+        # Temporary storage for batch grouping: {group_key: index_in_grouped_data}
+        batch_map = {}
+        
         for scan in recent_scans:
-            scans_data.append({
-                'supply': {
+            # Try to extract Group ID from notes
+            group_id = None
+            if scan.notes:
+                match = re.search(r'\(Group: (.*?)\)', scan.notes)
+                if match:
+                    group_id = match.group(1)
+            
+            # Create a key for grouping: (action, group_id, day_hour_minute)
+            timestamp_key = scan.timestamp.strftime('%Y%m%d%H%M')
+            group_key = f"{scan.action}_{group_id or 'single'}_{timestamp_key}" if group_id else None
+            
+            if group_key and group_key in batch_map:
+                # Add to existing group
+                idx = batch_map[group_key]
+                grouped_data[idx]['items'].append({
                     'name': scan.supply.name,
                     'id': scan.supply.id
-                },
-                'action': scan.action,
-                'scanned_by': {
-                    'username': scan.scanned_by.username
-                },
-                'location': scan.location,
-                'timestamp': scan.timestamp.isoformat()
-            })
+                })
+            else:
+                # New entry (single or start of group)
+                entry = {
+                    'action': scan.action,
+                    'scanned_by': {'username': scan.scanned_by.username},
+                    'location': scan.location,
+                    'timestamp': scan.timestamp.isoformat(),
+                    'is_batch': group_id is not None,
+                    'items': [{
+                        'name': scan.supply.name,
+                        'id': scan.supply.id
+                    }]
+                }
+                grouped_data.append(entry)
+                if group_id:
+                    batch_map[group_key] = len(grouped_data) - 1
+            
+            # Stop if we have 10 top-level entries
+            if len(grouped_data) >= 10:
+                break
         
         return JsonResponse({
             'success': True,
-            'recent_scans': scans_data
+            'recent_scans': grouped_data
         })
     except Exception as e:
         return JsonResponse({
@@ -853,31 +896,34 @@ def process_qr_scan(request):
         try:
             # Check if this is a borrowing QR code
             print(f"Processing QR data: {qr_data}")  # Debugging
-            if qr_data.startswith('BORROW-BATCH-'):
-                # Handle batch borrowing request QR code
+            if qr_data.startswith('BORROW-BATCH-') or qr_data.startswith('SUPPLY-REQ-BATCH-'):
+                # Handle batch request QR code (borrowing or supply)
                 parts = qr_data.split('-')
-                if len(parts) >= 4:
+                if qr_data.startswith('BORROW-BATCH-'):
+                    is_borrowing_batch = True
                     user_id = int(parts[2])
                     timestamp_str = parts[3]
+                else: # SUPPLY-REQ-BATCH-
+                    is_borrowing_batch = False
+                    user_id = int(parts[3])
+                    timestamp_str = parts[4]
                     target_time = timestamp_str[:12]
+                    group_id = f"{user_id}-{timestamp_str}"
                     
                     # Get all requests in this batch
-                    batch_requests_qs = SupplyRequest.objects.filter(
-                        user_id=user_id,
-                        purpose__startswith='[BORROWING]'
-                    )
-                    
-                    # Filter by timestamp proximity (same as request_list grouping)
+                    # Filter by user and timestamp proximity
                     batch_items = []
-                    for req in batch_requests_qs:
-                        if req.created_at.strftime('%Y%h%d%H%M') == target_time or req.created_at.strftime('%Y%m%d%H%M') == target_time:
+                    all_user_requests = SupplyRequest.objects.filter(user_id=user_id)
+                    for req in all_user_requests:
+                        if req.created_at.strftime('%Y%m%d%H%M') == target_time:
                             batch_items.append(req)
                     
                     if not batch_items:
                         return JsonResponse({'error': 'Batch requests not found'}, status=404)
                     
                     if action == 'scan':
-                        message = f"Batch Borrowing Request ({len(batch_items)} items)\n"
+                        msg_prefix = "Batch Borrowing" if is_borrowing_batch else "Batch Supply"
+                        message = f"{msg_prefix} Request ({len(batch_items)} items)\n"
                         message += f"Requested by: {batch_items[0].user.get_full_name() or batch_items[0].user.username}\n"
                         
                         items_data = []
@@ -899,217 +945,270 @@ def process_qr_scan(request):
                             'message': message,
                             'timestamp': timezone.now().isoformat()
                         })
-                    # Add handling for 'issue' and 'return' actions for batch if needed, 
-                    # but for now we'll focus on viewing and then issuing via existing single mechanisms 
-                    # or updated bulk mechanisms. The request was "so that when the gso scan it will view these batch items for release".
-            elif qr_data.startswith('BORROW-'):
-                # This is a borrowing request QR code
-                print("BORROW- QR code detected")  # Debugging
-                parts = qr_data.split('-')
-                if len(parts) >= 4:
-                    request_id = int(parts[1])
-                    user_id = int(parts[2])
-                    supply_id = int(parts[3])
                     
-                    print(f"Parsed QR data - Request ID: {request_id}, User ID: {user_id}, Supply ID: {supply_id}")  # Debugging
-                    
-                    # Get the borrowing request
-                    borrowing_request = get_object_or_404(SupplyRequest, id=request_id, user_id=user_id, supply_id=supply_id)
-                    
-                    print(f"Found borrowing request: {borrowing_request.id}")  # Debugging
-                    
-                    if action == 'scan':
-                        # Determine if this supply currently has an active borrowed item
-                        is_borrowed = BorrowedItem.objects.filter(
-                            supply=borrowing_request.supply,
-                            borrower=borrowing_request.user, # Specifically for this user
-                            returned_at__isnull=True
-                        ).exists()
-
-                        return JsonResponse({
-                            'success': True,
-                            'is_item_borrowed': is_borrowed,
-                            'supply': {
-                                'id': borrowing_request.supply.id,
-                                'name': borrowing_request.supply.name,
-                                'quantity': borrowing_request.supply.quantity,
-                                'location': borrowing_request.supply.location,
-                                'action': action,
-                                'timestamp': timezone.now().isoformat()
-                            },
-                            'borrowing_request': {
-                                'id': borrowing_request.id,
-                                'request_id': borrowing_request.request_id,
-                                'user': borrowing_request.user.get_full_name() or borrowing_request.user.username,
-                                'quantity_requested': borrowing_request.quantity_requested,
-                                'status': borrowing_request.status,
-                                'supply_name': borrowing_request.supply.name,
-                                'created_at': borrowing_request.created_at.isoformat()
-                            },
-                            'user': borrowing_request.user.get_full_name() or borrowing_request.user.username,
-                            'message': f"Borrowing request for {borrowing_request.supply.name} found."
-                        })
                     elif action == 'issue':
-                        # Issue the borrowed item
-                        supply = borrowing_request.supply
+                        # Batch Release/Issue Logic
+                        count = 0
+                        error_items = []
                         
-                        # Check if there's enough quantity available
-                        if supply.quantity >= borrowing_request.quantity_requested:
-                            # Reduce supply quantity
-                            previous_quantity = supply.quantity
-                            supply.quantity -= borrowing_request.quantity_requested
-                            supply.location = location
-                            supply.save()
+                        for req in batch_items:
+                            # Only process approved requests
+                            if req.status != 'approved':
+                                continue
+                            
+                            # Check stock
+                            if req.supply.quantity < req.quantity_requested:
+                                error_items.append(f"{req.supply.name} (Insufficient stock)")
+                                continue
+                                
+                            # Update supply quantity
+                            previous_quantity = req.supply.quantity
+                            req.supply.quantity -= req.quantity_requested
+                            req.supply.save()
+                            
+                            # Update request status
+                            req.status = 'released'
+                            req.released_by = request.user
+                            req.released_at = timezone.now()
+                            req.save()
+                            
+                            # Create BorrowedItem record if it's a borrowing request
+                            if '[BORROWING]' in req.purpose:
+                                BorrowedItem.objects.create(
+                                    supply=req.supply,
+                                    borrower=req.user,
+                                    borrowed_quantity=req.quantity_requested,
+                                    borrowed_date=timezone.now().date(),
+                                    location_when_borrowed=req.supply.location or location,
+                                    notes=f"Released via Batch QR Scan (Group: {group_id})"
+                                )
                             
                             # Log inventory transaction
                             InventoryTransaction.objects.create(
-                                supply=supply,
+                                supply=req.supply,
                                 transaction_type='out',
-                                quantity=-borrowing_request.quantity_requested,
+                                quantity=-req.quantity_requested,
                                 previous_quantity=previous_quantity,
-                                new_quantity=supply.quantity,
-                                reason=f"Issued for borrowing request {borrowing_request.request_id}",
+                                new_quantity=req.supply.quantity,
+                                reason=f"Released via Batch QR Scan (Group: {group_id})",
                                 performed_by=request.user
                             )
+                            count += 1
+                        
+                        if count == 0 and not error_items:
+                            return JsonResponse({'error': 'No approved items in this batch are ready for release.'}, status=400)
                             
-                            # Check for low stock alert
-                            new_quantity = supply.quantity
-                            alert_message = check_low_stock_alerts(supply, previous_quantity, new_quantity)
-                            if alert_message:
-                                message += f' {alert_message}'
+                        msg = f'Successfully released {count} items.'
+                        if error_items:
+                            msg += f' Failed items: {", ".join(error_items)}'
+                        
+                        return JsonResponse({
+                            'success': True,
+                            'is_batch': True,
+                            'count': count,
+                            'message': msg,
+                            'errors': error_items
+                        })
+            elif qr_data.startswith('BORROW-') or qr_data.startswith('SUPPLY-REQ-'):
+                # This is a borrowing or supply request QR code
+                parts = qr_data.split('-')
+                if qr_data.startswith('BORROW-'):
+                    request_id = int(parts[1])
+                    user_id = int(parts[2])
+                    supply_id = int(parts[3])
+                else: # SUPPLY-REQ-
+                    request_id = int(parts[2])
+                    user_id = int(parts[3])
+                    supply_id = int(parts[4])
+                
+                print(f"Parsed QR data - Request ID: {request_id}, User ID: {user_id}, Supply ID: {supply_id}")  # Debugging
+                
+                # Get the request
+                borrowing_request = get_object_or_404(SupplyRequest, id=request_id, user_id=user_id, supply_id=supply_id)
+                message = ""
+                
+                if action == 'scan':
+                    # Determine if this supply currently has an active borrowed item
+                    is_borrowed = BorrowedItem.objects.filter(
+                        supply=borrowing_request.supply,
+                        borrower=borrowing_request.user, # Specifically for this user
+                        returned_at__isnull=True
+                    ).exists()
+
+                    return JsonResponse({
+                        'success': True,
+                        'is_item_borrowed': is_borrowed,
+                        'supply': {
+                            'id': borrowing_request.supply.id,
+                            'name': borrowing_request.supply.name,
+                            'quantity': borrowing_request.supply.quantity,
+                            'location': borrowing_request.supply.location,
+                            'action': action,
+                            'timestamp': timezone.now().isoformat()
+                        },
+                        'borrowing_request': {
+                            'id': borrowing_request.id,
+                            'request_id': borrowing_request.request_id,
+                            'user': borrowing_request.user.get_full_name() or borrowing_request.user.username,
+                            'quantity_requested': borrowing_request.quantity_requested,
+                            'status': borrowing_request.status,
+                            'supply_name': borrowing_request.supply.name,
+                            'created_at': borrowing_request.created_at.isoformat()
+                        },
+                        'user': borrowing_request.user.get_full_name() or borrowing_request.user.username,
+                        'message': f"Request for {borrowing_request.supply.name} found."
+                    })
+                elif action == 'issue':
+                    # Issue the borrowed/requested item
+                    supply = borrowing_request.supply
+                    
+                    # Check if there's enough quantity available
+                    if supply.quantity >= borrowing_request.quantity_requested:
+                        # Reduce supply quantity
+                        previous_quantity = supply.quantity
+                        supply.quantity -= borrowing_request.quantity_requested
+                        if location:
+                            supply.location = location
+                        supply.save()
                             
-                            # Mark the borrowing request as released
-                            borrowing_request.status = 'released'
-                            borrowing_request.released_by = request.user
-                            borrowing_request.released_at = timezone.now()
-                            borrowing_request.save()
-                            
-                            # Track borrowed item with the correct borrower
+                        # Track borrowed item with the correct borrower
+                        if '[BORROWING]' in borrowing_request.purpose:
                             BorrowedItem.objects.create(
                                 supply=supply,
                                 borrower=borrowing_request.user,
                                 borrowed_quantity=borrowing_request.quantity_requested,
                                 borrowed_date=timezone.now().date(),
-                                location_when_borrowed=location,
+                                location_when_borrowed=location or supply.location,
                                 notes=notes
                             )
-                            
-                            message += f' Fulfilled borrowing request {borrowing_request.request_id}.'
-                            
-                            # Log the scan
-                            scan_log = QRScanLog.objects.create(
-                                supply=supply,
-                                scanned_by=request.user,
-                                action=action,
-                                location=location,
-                                notes=notes
-                            )
-                            
-                            # Log inventory transaction
-                            InventoryTransaction.objects.create(
-                                supply=supply,
-                                transaction_type='out',
-                                quantity=-borrowing_request.quantity_requested,
-                                previous_quantity=previous_quantity,
-                                new_quantity=supply.quantity,
-                                reason=f"Issued {borrowing_request.quantity_requested} items via QR scan for borrowing request {borrowing_request.request_id}",
-                                performed_by=request.user
-                            )
-                            
-                            # Get recent transaction history for this supply
-                            recent_transactions = supply.transactions.order_by('-created_at')[:5]
-                            transaction_history = [{
-                                'transaction_type': t.transaction_type,
-                                'quantity': t.quantity,
-                                'created_at': t.created_at.isoformat()
-                            } for t in recent_transactions]
-                            
-                            return JsonResponse({
-                                'success': True,
-                                'supply': {
-                                    'id': supply.id,
-                                    'name': supply.name,
-                                    'quantity': supply.quantity,
-                                    'location': supply.location,
-                                    'action': action,
-                                    'timestamp': scan_log.timestamp.isoformat()
-                                },
-                                'transaction_history': transaction_history,
-                                'message': message
-                            })
-                        else:
-                            return JsonResponse({'error': f'Insufficient stock. Only {supply.quantity} items available.'}, status=400)
-                    elif action == 'return':
-                        # Return the borrowed item
-                        supply = borrowing_request.supply
                         
-                        # Find the borrowed item record
-                        try:
-                            borrowed_item = BorrowedItem.objects.filter(
-                                supply=supply,
-                                borrower=borrowing_request.user,
-                                returned_at__isnull=True
-                            ).latest('borrowed_at')
-                            
-                            # Increase supply quantity
-                            previous_quantity = supply.quantity
-                            supply.quantity += borrowed_item.borrowed_quantity
+                        # Mark the request as released
+                        borrowing_request.status = 'released'
+                        borrowing_request.released_by = request.user
+                        borrowing_request.released_at = timezone.now()
+                        borrowing_request.save()
+                        
+                        # Log inventory transaction
+                        InventoryTransaction.objects.create(
+                            supply=supply,
+                            transaction_type='out',
+                            quantity=-borrowing_request.quantity_requested,
+                            previous_quantity=previous_quantity,
+                            new_quantity=supply.quantity,
+                            reason=f"Released via Request QR Scan (REQ: {borrowing_request.request_id})",
+                            performed_by=request.user
+                        )
+                        
+                        message += f' Fulfilled request {borrowing_request.request_id}.'
+                        
+                        # Log the scan
+                        scan_log = QRScanLog.objects.create(
+                            supply=supply,
+                            scanned_by=request.user,
+                            action=action,
+                            location=location or supply.location,
+                            notes=notes
+                        )
+                        
+                        # Get recent transaction history for this supply
+                        recent_transactions = supply.transactions.order_by('-created_at')[:5]
+                        transaction_history = [{
+                            'transaction_type': t.transaction_type,
+                            'quantity': t.quantity,
+                            'created_at': t.created_at.isoformat()
+                        } for t in recent_transactions]
+                        
+                        return JsonResponse({
+                            'success': True,
+                            'supply': {
+                                'id': supply.id,
+                                'name': supply.name,
+                                'quantity': supply.quantity,
+                                'location': supply.location,
+                                'action': action,
+                                'timestamp': scan_log.timestamp.isoformat()
+                            },
+                            'transaction_history': transaction_history,
+                            'message': message
+                        })
+                    else:
+                        return JsonResponse({'error': f'Insufficient stock. Only {supply.quantity} items available.'}, status=400)
+                
+                elif action == 'return':
+                    # Return/add back logically
+                    supply = borrowing_request.supply
+                    
+                    # Find any active borrowed item record if applicable
+                    try:
+                        borrowed_item = BorrowedItem.objects.filter(
+                            supply=supply,
+                            borrower=borrowing_request.user,
+                            returned_at__isnull=True
+                        ).latest('borrowed_at')
+                        
+                        # Increase supply quantity
+                        previous_quantity = supply.quantity
+                        supply.quantity += borrowed_item.borrowed_quantity
+                        if location:
                             supply.location = location
-                            supply.save()
-                            
-                            # Mark borrowed item as returned
-                            borrowed_item.returned_at = timezone.now()
+                        supply.save()
+                        
+                        # Mark borrowed item as returned
+                        borrowed_item.returned_at = timezone.now()
+                        if location:
                             borrowed_item.location_when_returned = location
-                            borrowed_item.save()
-                            
-                            message = f'Supply {supply.name} returned successfully. Quantity increased by {borrowed_item.borrowed_quantity}.'
-                            message += f' Borrowed for {borrowed_item.duration_display}.'
-                            
-                            # Log the scan
-                            scan_log = QRScanLog.objects.create(
-                                supply=supply,
-                                scanned_by=request.user,
-                                action=action,
-                                location=location,
-                                notes=notes
-                            )
-                            
-                            # Log inventory transaction
-                            InventoryTransaction.objects.create(
-                                supply=supply,
-                                transaction_type='in',
-                                quantity=borrowed_item.borrowed_quantity,
-                                previous_quantity=previous_quantity,
-                                new_quantity=supply.quantity,
-                                reason=f"Returned {borrowed_item.borrowed_quantity} items via QR scan for borrowing request {borrowing_request.request_id}",
-                                performed_by=request.user
-                            )
-                            
-                            # Get recent transaction history for this supply
-                            recent_transactions = supply.transactions.order_by('-created_at')[:5]
-                            transaction_history = [{
-                                'transaction_type': t.transaction_type,
-                                'quantity': t.quantity,
-                                'created_at': t.created_at.isoformat()
-                            } for t in recent_transactions]
-                            
-                            return JsonResponse({
-                                'success': True,
-                                'supply': {
-                                    'id': supply.id,
-                                    'name': supply.name,
-                                    'quantity': supply.quantity,
-                                    'location': supply.location,
-                                    'action': action,
-                                    'timestamp': scan_log.timestamp.isoformat()
-                                },
-                                'transaction_history': transaction_history,
-                                'message': message
-                            })
-                        except BorrowedItem.DoesNotExist:
-                            return JsonResponse({'error': 'No active borrowed item found for this request.'}, status=400)
+                        borrowed_item.save()
+                        
+                        message = f'Supply {supply.name} returned successfully. Quantity increased by {borrowed_item.borrowed_quantity}.'
+                        message += f' Borrowed for {borrowed_item.duration_display}.'
+                        
+                        # Log the scan
+                        scan_log = QRScanLog.objects.create(
+                            supply=supply,
+                            scanned_by=request.user,
+                            action=action,
+                            location=location or supply.location,
+                            notes=notes
+                        )
+                        
+                        # Log inventory transaction
+                        InventoryTransaction.objects.create(
+                            supply=supply,
+                            transaction_type='in',
+                            quantity=borrowed_item.borrowed_quantity,
+                            previous_quantity=previous_quantity,
+                            new_quantity=supply.quantity,
+                            reason=f"Returned items via QR scan for request {borrowing_request.request_id}",
+                            performed_by=request.user
+                        )
+                        
+                        # Get recent transaction history for this supply
+                        recent_transactions = supply.transactions.order_by('-created_at')[:5]
+                        transaction_history = [{
+                            'transaction_type': t.transaction_type,
+                            'quantity': t.quantity,
+                            'created_at': t.created_at.isoformat()
+                        } for t in recent_transactions]
+                        
+                        return JsonResponse({
+                            'success': True,
+                            'supply': {
+                                'id': supply.id,
+                                'name': supply.name,
+                                'quantity': supply.quantity,
+                                'location': supply.location,
+                                'action': action,
+                                'timestamp': scan_log.timestamp.isoformat()
+                            },
+                            'transaction_history': transaction_history,
+                            'message': message
+                        })
+                    except BorrowedItem.DoesNotExist:
+                        # Fallback for consumable returns if enabled
+                        return JsonResponse({'error': 'No active borrowed item found for this request.'}, status=400)
                 else:
-                    return JsonResponse({'error': 'Invalid borrowing QR code format.'}, status=400)
+                    return JsonResponse({'error': 'Invalid request action.'}, status=400)
+
 
             # If the frontend supplied a borrowing_request_id directly (JSON payload),
             # allow the scanner to operate on that request as well. This enables the
@@ -3339,7 +3438,14 @@ def bulk_request_create(request):
             if not purpose:
                 messages.error(request, "Purpose is required for bulk requests.")
                 return redirect('supply_list')
-                
+            
+            # Generate a consistent group_id for this batch
+            timestamp = timezone.now().strftime('%Y%m%d%H%M')
+            group_id = f"{request.user.id}-{timestamp}"
+            
+            first_request = None
+            batch_requests = []
+            
             for s_id in supply_ids:
                 try:
                     qty_str = request.POST.get(f'quantity_{s_id}', '0')
@@ -3352,17 +3458,35 @@ def bulk_request_create(request):
                             if not final_purpose.startswith('[BORROWING]'):
                                 final_purpose = f"[BORROWING] {final_purpose}"
                         
-                        SupplyRequest.objects.create(
+                        req = SupplyRequest.objects.create(
                             user=request.user,
                             supply=supply,
                             quantity_requested=qty,
                             purpose=final_purpose
                         )
+                        batch_requests.append(req)
+                        if not first_request:
+                            first_request = req
                 except ValueError:
                     continue
             
-            messages.success(request, 'Bulk request submitted successfully.')
-            return redirect('request_list')
+            if first_request:
+                if len(batch_requests) == 1:
+                    # Treat as a single request if only one item was selected
+                    first_request.generate_borrowing_qr_code()
+                    messages.success(request, f'Request {first_request.request_id} created successfully.')
+                else:
+                    # Generate ONE QR code for the batch
+                    first_request.generate_borrowing_qr_code(group_id=group_id)
+                    
+                    # Apply same QR code to all items in batch
+                    qr_file = first_request.borrowing_qr_code.name
+                    for req in batch_requests[1:]:
+                        req.borrowing_qr_code = qr_file
+                        req.save()
+                    messages.success(request, f'Batch of {len(batch_requests)} requests created successfully.')
+                
+                return redirect('request_detail', pk=first_request.pk)
             
         elif bulk_action == 'start_bulk':
             supplies = Supply.objects.filter(id__in=supply_ids)
@@ -3383,6 +3507,10 @@ def bulk_approve_request(request, group_id):
         return redirect('request_list')
     
     try:
+        # Handle prefix if present (e.g., from QR scan)
+        if 'BATCH-' in group_id:
+            group_id = group_id.split('BATCH-')[-1]
+            
         user_id, timestamp_str = group_id.split('-', 1)
         target_time = timestamp_str[:12]
         
@@ -3418,6 +3546,10 @@ def bulk_reject_request(request, group_id):
     reason = request.POST.get('reason', '')
     
     try:
+        # Handle prefix if present (e.g., from QR scan)
+        if 'BATCH-' in group_id:
+            group_id = group_id.split('BATCH-')[-1]
+            
         user_id, timestamp_str = group_id.split('-', 1)
         target_time = timestamp_str[:12]
         
@@ -3454,6 +3586,10 @@ def bulk_release_request(request, group_id):
         return redirect('request_list')
     
     try:
+        # Handle prefix if present (e.g., from QR scan)
+        if 'BATCH-' in group_id:
+            group_id = group_id.split('BATCH-')[-1]
+            
         user_id, timestamp_str = group_id.split('-', 1)
         target_time = timestamp_str[:12]
         
@@ -3517,6 +3653,16 @@ def bulk_release_request(request, group_id):
                 new_quantity=req.supply.quantity,
                 reason=f"Released in bulk batch (Group: {group_id})",
                 performed_by=request.user
+            )
+
+            # Log the scan for the scanner's recent transmissions list
+            from .models import QRScanLog
+            QRScanLog.objects.create(
+                supply=req.supply,
+                scanned_by=request.user,
+                action='issue',
+                location=req.supply.location or '',
+                notes=f"Released in bulk batch (Group: {group_id})"
             )
             count += 1
         
