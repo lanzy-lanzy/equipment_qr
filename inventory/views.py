@@ -910,108 +910,109 @@ def process_qr_scan(request):
                     is_borrowing_batch = False
                     user_id = int(parts[3])
                     timestamp_str = parts[4]
-                    target_time = timestamp_str[:12]
-                    group_id = f"{user_id}-{timestamp_str}"
+                
+                target_time = timestamp_str[:12]
+                group_id = f"{user_id}-{timestamp_str}"
+                
+                # Get all requests in this batch
+                # Filter by user and timestamp proximity
+                batch_items = []
+                all_user_requests = SupplyRequest.objects.filter(user_id=user_id)
+                for req in all_user_requests:
+                    if req.created_at.strftime('%Y%m%d%H%M') == target_time:
+                        batch_items.append(req)
+                
+                if not batch_items:
+                    return JsonResponse({'error': 'Batch requests not found'}, status=404)
+                
+                if action == 'scan':
+                    msg_prefix = "Batch Borrowing" if is_borrowing_batch else "Batch Supply"
+                    message = f"{msg_prefix} Request ({len(batch_items)} items)\n"
+                    message += f"Requested by: {batch_items[0].user.get_full_name() or batch_items[0].user.username}\n"
                     
-                    # Get all requests in this batch
-                    # Filter by user and timestamp proximity
-                    batch_items = []
-                    all_user_requests = SupplyRequest.objects.filter(user_id=user_id)
-                    for req in all_user_requests:
-                        if req.created_at.strftime('%Y%m%d%H%M') == target_time:
-                            batch_items.append(req)
-                    
-                    if not batch_items:
-                        return JsonResponse({'error': 'Batch requests not found'}, status=404)
-                    
-                    if action == 'scan':
-                        msg_prefix = "Batch Borrowing" if is_borrowing_batch else "Batch Supply"
-                        message = f"{msg_prefix} Request ({len(batch_items)} items)\n"
-                        message += f"Requested by: {batch_items[0].user.get_full_name() or batch_items[0].user.username}\n"
-                        
-                        items_data = []
-                        for req in batch_items:
-                            items_data.append({
-                                'id': req.id,
-                                'request_id': req.request_id,
-                                'supply_name': req.supply.name,
-                                'quantity_requested': req.quantity_requested,
-                                'status': req.status,
-                                'unit': req.supply.unit or 'pieces'
-                            })
-                        
-                        return JsonResponse({
-                            'success': True,
-                            'is_batch': True,
-                            'batch_items': items_data,
-                            'user': batch_items[0].user.username,
-                            'message': message,
-                            'timestamp': timezone.now().isoformat()
+                    items_data = []
+                    for req in batch_items:
+                        items_data.append({
+                            'id': req.id,
+                            'request_id': req.request_id,
+                            'supply_name': req.supply.name,
+                            'quantity_requested': req.quantity_requested,
+                            'status': req.status,
+                            'unit': req.supply.unit or 'pieces'
                         })
                     
-                    elif action == 'issue':
-                        # Batch Release/Issue Logic
-                        count = 0
-                        error_items = []
+                    return JsonResponse({
+                        'success': True,
+                        'is_batch': True,
+                        'batch_items': items_data,
+                        'user': batch_items[0].user.username,
+                        'message': message,
+                        'timestamp': timezone.now().isoformat()
+                    })
+                
+                elif action == 'issue':
+                    # Batch Release/Issue Logic
+                    count = 0
+                    error_items = []
+                    
+                    for req in batch_items:
+                        # Only process approved requests
+                        if req.status != 'approved':
+                            continue
                         
-                        for req in batch_items:
-                            # Only process approved requests
-                            if req.status != 'approved':
-                                continue
+                        # Check stock
+                        if req.supply.quantity < req.quantity_requested:
+                            error_items.append(f"{req.supply.name} (Insufficient stock)")
+                            continue
                             
-                            # Check stock
-                            if req.supply.quantity < req.quantity_requested:
-                                error_items.append(f"{req.supply.name} (Insufficient stock)")
-                                continue
-                                
-                            # Update supply quantity
-                            previous_quantity = req.supply.quantity
-                            req.supply.quantity -= req.quantity_requested
-                            req.supply.save()
-                            
-                            # Update request status
-                            req.status = 'released'
-                            req.released_by = request.user
-                            req.released_at = timezone.now()
-                            req.save()
-                            
-                            # Create BorrowedItem record if it's a borrowing request
-                            if '[BORROWING]' in req.purpose:
-                                BorrowedItem.objects.create(
-                                    supply=req.supply,
-                                    borrower=req.user,
-                                    borrowed_quantity=req.quantity_requested,
-                                    borrowed_date=timezone.now().date(),
-                                    location_when_borrowed=req.supply.location or location,
-                                    notes=f"Released via Batch QR Scan (Group: {group_id})"
-                                )
-                            
-                            # Log inventory transaction
-                            InventoryTransaction.objects.create(
+                        # Update supply quantity
+                        previous_quantity = req.supply.quantity
+                        req.supply.quantity -= req.quantity_requested
+                        req.supply.save()
+                        
+                        # Update request status
+                        req.status = 'released'
+                        req.released_by = request.user
+                        req.released_at = timezone.now()
+                        req.save()
+                        
+                        # Create BorrowedItem record if it's a borrowing request
+                        if '[BORROWING]' in req.purpose:
+                            BorrowedItem.objects.create(
                                 supply=req.supply,
-                                transaction_type='out',
-                                quantity=-req.quantity_requested,
-                                previous_quantity=previous_quantity,
-                                new_quantity=req.supply.quantity,
-                                reason=f"Released via Batch QR Scan (Group: {group_id})",
-                                performed_by=request.user
+                                borrower=req.user,
+                                borrowed_quantity=req.quantity_requested,
+                                borrowed_date=timezone.now().date(),
+                                location_when_borrowed=req.supply.location or location,
+                                notes=f"Released via Batch QR Scan (Group: {group_id})"
                             )
-                            count += 1
                         
-                        if count == 0 and not error_items:
-                            return JsonResponse({'error': 'No approved items in this batch are ready for release.'}, status=400)
-                            
-                        msg = f'Successfully released {count} items.'
-                        if error_items:
-                            msg += f' Failed items: {", ".join(error_items)}'
+                        # Log inventory transaction
+                        InventoryTransaction.objects.create(
+                            supply=req.supply,
+                            transaction_type='out',
+                            quantity=-req.quantity_requested,
+                            previous_quantity=previous_quantity,
+                            new_quantity=req.supply.quantity,
+                            reason=f"Released via Batch QR Scan (Group: {group_id})",
+                            performed_by=request.user
+                        )
+                        count += 1
+                    
+                    if count == 0 and not error_items:
+                        return JsonResponse({'error': 'No approved items in this batch are ready for release.'}, status=400)
                         
-                        return JsonResponse({
-                            'success': True,
-                            'is_batch': True,
-                            'count': count,
-                            'message': msg,
-                            'errors': error_items
-                        })
+                    msg = f'Successfully released {count} items.'
+                    if error_items:
+                        msg += f' Failed items: {", ".join(error_items)}'
+                    
+                    return JsonResponse({
+                        'success': True,
+                        'is_batch': True,
+                        'count': count,
+                        'message': msg,
+                        'errors': error_items
+                    })
             elif qr_data.startswith('BORROW-') or qr_data.startswith('SUPPLY-REQ-'):
                 # This is a borrowing or supply request QR code
                 parts = qr_data.split('-')

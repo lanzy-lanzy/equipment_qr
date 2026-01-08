@@ -90,6 +90,7 @@
 </div>
 
 <!-- Role-specific Content -->
+{% if user.role == 'admin' or user.role == 'gso_staff' %}
 <!-- Admin/GSO Staff Dashboard -->
 <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
     <!-- Overdue Items -->
