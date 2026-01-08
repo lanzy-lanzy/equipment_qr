@@ -567,8 +567,49 @@ def request_detail(request, pk):
         messages.error(request, 'You can only view your own requests.')
         return redirect('request_list')
     
+    # Get all items in the same batch (including this one)
+    batch_items = SupplyRequest.objects.filter(
+        user=supply_request.user,
+        created_at__year=supply_request.created_at.year,
+        created_at__month=supply_request.created_at.month,
+        created_at__day=supply_request.created_at.day,
+        created_at__hour=supply_request.created_at.hour,
+        created_at__minute=supply_request.created_at.minute
+    ).order_by('id')
+    
+    is_batch = batch_items.count() > 1
+    
+    # Ensure a unified QR code exists for the batch if items are approved or released
+    if is_batch and any(item.status in ['approved', 'released'] for item in batch_items):
+        # Try to find an existing QR code among batch items
+        shared_qr = None
+        for item in batch_items:
+            if item.borrowing_qr_code and item.borrowing_qr_code.name:
+                shared_qr = item.borrowing_qr_code
+                break
+        
+        if not shared_qr:
+            # Generate a new unified QR code for the batch
+            group_id = f"{supply_request.user.id}-{supply_request.created_at.strftime('%Y%m%d%H%M')}"
+            supply_request.generate_borrowing_qr_code(group_id=group_id)
+            shared_qr = supply_request.borrowing_qr_code
+            
+        # Ensure all items in the batch use the same QR code in the DB
+        # and ensure the current supply_request object has it set
+        qr_name = shared_qr.name
+        for item in batch_items:
+            if not item.borrowing_qr_code or item.borrowing_qr_code.name != qr_name:
+                item.borrowing_qr_code = qr_name
+                item.save()
+        
+        # Explicitly set it on the main request being viewed to ensure template sees it
+        if not supply_request.borrowing_qr_code or supply_request.borrowing_qr_code.name != qr_name:
+            supply_request.borrowing_qr_code = shared_qr
+    
     context = {
         'supply_request': supply_request,
+        'batch_items': batch_items,
+        'is_batch': is_batch
     }
     
     return render(request, 'inventory/request_detail.html', context)
@@ -594,10 +635,33 @@ def request_approve(request, pk):
         return redirect('approve_borrow_request', pk=pk)
     else:
         # Regular supply request approval
+        now = timezone.now()
         supply_request.status = 'approved'
         supply_request.approved_by = request.user
-        supply_request.approved_at = timezone.now()
+        supply_request.approved_at = now
         supply_request.save()
+        
+        # Sync with other items in the same batch
+        batch_qs = SupplyRequest.objects.filter(
+            user=supply_request.user,
+            created_at__year=supply_request.created_at.year,
+            created_at__month=supply_request.created_at.month,
+            created_at__day=supply_request.created_at.day,
+            created_at__hour=supply_request.created_at.hour,
+            created_at__minute=supply_request.created_at.minute
+        )
+        
+        batch_qs.filter(status='pending').update(
+            status='approved',
+            approved_by=request.user,
+            approved_at=now
+        )
+        
+        # Proactively generate batch QR code for unified scanning
+        if batch_qs.count() > 1:
+            group_id = f"{supply_request.user.id}-{supply_request.created_at.strftime('%Y%m%d%H%M')}"
+            supply_request.generate_borrowing_qr_code(group_id=group_id)
+            batch_qs.update(borrowing_qr_code=supply_request.borrowing_qr_code.name)
         
         if request.htmx:
             messages.success(request, f'Request {supply_request.request_id} approved successfully.')
@@ -789,7 +853,56 @@ def process_qr_scan(request):
         try:
             # Check if this is a borrowing QR code
             print(f"Processing QR data: {qr_data}")  # Debugging
-            if qr_data.startswith('BORROW-'):
+            if qr_data.startswith('BORROW-BATCH-'):
+                # Handle batch borrowing request QR code
+                parts = qr_data.split('-')
+                if len(parts) >= 4:
+                    user_id = int(parts[2])
+                    timestamp_str = parts[3]
+                    target_time = timestamp_str[:12]
+                    
+                    # Get all requests in this batch
+                    batch_requests_qs = SupplyRequest.objects.filter(
+                        user_id=user_id,
+                        purpose__startswith='[BORROWING]'
+                    )
+                    
+                    # Filter by timestamp proximity (same as request_list grouping)
+                    batch_items = []
+                    for req in batch_requests_qs:
+                        if req.created_at.strftime('%Y%h%d%H%M') == target_time or req.created_at.strftime('%Y%m%d%H%M') == target_time:
+                            batch_items.append(req)
+                    
+                    if not batch_items:
+                        return JsonResponse({'error': 'Batch requests not found'}, status=404)
+                    
+                    if action == 'scan':
+                        message = f"Batch Borrowing Request ({len(batch_items)} items)\n"
+                        message += f"Requested by: {batch_items[0].user.get_full_name() or batch_items[0].user.username}\n"
+                        
+                        items_data = []
+                        for req in batch_items:
+                            items_data.append({
+                                'id': req.id,
+                                'request_id': req.request_id,
+                                'supply_name': req.supply.name,
+                                'quantity_requested': req.quantity_requested,
+                                'status': req.status,
+                                'unit': req.supply.unit or 'pieces'
+                            })
+                        
+                        return JsonResponse({
+                            'success': True,
+                            'is_batch': True,
+                            'batch_items': items_data,
+                            'user': batch_items[0].user.username,
+                            'message': message,
+                            'timestamp': timezone.now().isoformat()
+                        })
+                    # Add handling for 'issue' and 'return' actions for batch if needed, 
+                    # but for now we'll focus on viewing and then issuing via existing single mechanisms 
+                    # or updated bulk mechanisms. The request was "so that when the gso scan it will view these batch items for release".
+            elif qr_data.startswith('BORROW-'):
                 # This is a borrowing request QR code
                 print("BORROW- QR code detected")  # Debugging
                 parts = qr_data.split('-')
@@ -806,22 +919,16 @@ def process_qr_scan(request):
                     print(f"Found borrowing request: {borrowing_request.id}")  # Debugging
                     
                     if action == 'scan':
-                        # For scan action, just show borrowing request details
-                        message = f"Borrowing Request: {borrowing_request.supply.name}\n"
-                        message += f"Requested by: {borrowing_request.user.get_full_name() or borrowing_request.user.username}\n"
-                        message += f"Quantity: {borrowing_request.quantity_requested}\n"
-                        message += f"Status: {borrowing_request.get_status_display()}"
-                        
-                        print(f"Returning borrowing request details: {message}")  # Debugging
-                        
                         # Determine if this supply currently has an active borrowed item
                         is_borrowed = BorrowedItem.objects.filter(
                             supply=borrowing_request.supply,
+                            borrower=borrowing_request.user, # Specifically for this user
                             returned_at__isnull=True
                         ).exists()
 
                         return JsonResponse({
                             'success': True,
+                            'is_item_borrowed': is_borrowed,
                             'supply': {
                                 'id': borrowing_request.supply.id,
                                 'name': borrowing_request.supply.name,
@@ -833,13 +940,14 @@ def process_qr_scan(request):
                             'borrowing_request': {
                                 'id': borrowing_request.id,
                                 'request_id': borrowing_request.request_id,
-                                'user': borrowing_request.user.username,
+                                'user': borrowing_request.user.get_full_name() or borrowing_request.user.username,
                                 'quantity_requested': borrowing_request.quantity_requested,
                                 'status': borrowing_request.status,
-                                'created_at': borrowing_request.created_at.strftime('%B %d, %Y')
+                                'supply_name': borrowing_request.supply.name,
+                                'created_at': borrowing_request.created_at.isoformat()
                             },
-                            'message': message,
-                            'is_item_borrowed': is_borrowed
+                            'user': borrowing_request.user.get_full_name() or borrowing_request.user.username,
+                            'message': f"Borrowing request for {borrowing_request.supply.name} found."
                         })
                     elif action == 'issue':
                         # Issue the borrowed item
@@ -2398,12 +2506,40 @@ def approve_borrow_request(request, pk):
         # Determine which action the user took: 'approve' (approve only) or 'create' (approve + create borrow record)
         action = request.POST.get('action', 'create')
         if action == 'approve':
-            # Approve the request but do not create the borrow record / release the item
+            # Approve the request and synchronize with other pending items in the same batch
+            now = timezone.now()
             supply_request.status = 'approved'
             supply_request.approved_by = request.user
-            supply_request.approved_at = timezone.now()
+            supply_request.approved_at = now
             supply_request.save()
-            messages.success(request, f'Request {supply_request.request_id} approved. Create borrow record on the approve page when ready.')
+            
+            # Sync with other items in the same batch (created by same user within same minute)
+            batch_qs = SupplyRequest.objects.filter(
+                user=supply_request.user,
+                created_at__year=supply_request.created_at.year,
+                created_at__month=supply_request.created_at.month,
+                created_at__day=supply_request.created_at.day,
+                created_at__hour=supply_request.created_at.hour,
+                created_at__minute=supply_request.created_at.minute
+            )
+            
+            synchronized_count = batch_qs.filter(status='pending').exclude(pk=supply_request.pk).update(
+                status='approved',
+                approved_by=request.user,
+                approved_at=now
+            )
+            
+            # Proactively generate/sync batch QR code
+            if batch_qs.count() > 1:
+                group_id = f"{supply_request.user.id}-{supply_request.created_at.strftime('%Y%m%d%H%M')}"
+                supply_request.generate_borrowing_qr_code(group_id=group_id)
+                batch_qs.update(borrowing_qr_code=supply_request.borrowing_qr_code.name)
+            
+            if synchronized_count > 0:
+                messages.success(request, f'Batch approved successfully. {synchronized_count + 1} items are now ready for release.')
+            else:
+                messages.success(request, f'Request {supply_request.request_id} approved successfully.')
+                
             return redirect('request_detail', pk=pk)
         else:
             # Default behavior: create BorrowedItem and mark as released (existing behavior)
@@ -2416,12 +2552,28 @@ def approve_borrow_request(request, pk):
                 borrowed_item.save()
 
                 # Update supply request status to released
+                now = timezone.now()
                 supply_request.status = 'released'
                 supply_request.approved_by = request.user
-                supply_request.approved_at = timezone.now()
+                supply_request.approved_at = now
                 supply_request.released_by = request.user
-                supply_request.released_at = timezone.now()
+                supply_request.released_at = now
                 supply_request.save()
+
+                # Also synchronize approval for other pending items in the same batch
+                SupplyRequest.objects.filter(
+                    user=supply_request.user,
+                    status='pending',
+                    created_at__year=supply_request.created_at.year,
+                    created_at__month=supply_request.created_at.month,
+                    created_at__day=supply_request.created_at.day,
+                    created_at__hour=supply_request.created_at.hour,
+                    created_at__minute=supply_request.created_at.minute
+                ).update(
+                    status='approved',
+                    approved_by=request.user,
+                    approved_at=now
+                )
 
                 # Update supply quantity
                 previous_quantity = supply_request.supply.quantity
@@ -2583,6 +2735,13 @@ def request_borrow_batch(request):
                 messages.error(request, "Please select at least one item to borrow.")
             else:
                 try:
+                    # Generate a consistent group_id for this batch
+                    timestamp = timezone.now().strftime('%Y%m%d%H%M')
+                    group_id = f"{request.user.id}-{timestamp}"
+                    
+                    first_request = None
+                    batch_requests = []
+                    
                     for s_id in supply_ids:
                         qty_str = request.POST.get(f'quantity_{s_id}', '0')
                         qty = int(qty_str) if qty_str else 0
@@ -2597,9 +2756,21 @@ def request_borrow_batch(request):
                                 purpose=f"[BORROWING] {purpose}\n\nBorrow Duration: {borrow_duration} days",
                                 status='pending'
                             )
-                            
-                            # Generate borrowing QR code
-                            supply_request.generate_borrowing_qr_code()
+                            batch_requests.append(supply_request)
+                            if not first_request:
+                                first_request = supply_request
+                    
+                    if first_request:
+                        # Generate ONE borrowing QR code for the first request in the batch
+                        # with the group_id so scanning it finds all items.
+                        first_request.generate_borrowing_qr_code(group_id=group_id)
+                        
+                        # Apply the same QR code to all other requests in the batch
+                        if len(batch_requests) > 1:
+                            qr_code_file = first_request.borrowing_qr_code
+                            for req in batch_requests[1:]:
+                                req.borrowing_qr_code = qr_code_file
+                                req.save()
                     
                     messages.success(
                         request,
@@ -3273,9 +3444,12 @@ def bulk_reject_request(request, group_id):
 
 @login_required
 @require_POST
+@login_required
 def bulk_release_request(request, group_id):
     """Release all approved items in a grouped request."""
     if request.user.role not in ['admin', 'gso_staff']:
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+            return JsonResponse({'error': 'Unauthorized'}, status=403)
         messages.error(request, 'Unauthorized')
         return redirect('request_list')
     
@@ -3283,37 +3457,82 @@ def bulk_release_request(request, group_id):
         user_id, timestamp_str = group_id.split('-', 1)
         target_time = timestamp_str[:12]
         
-        requests = SupplyRequest.objects.filter(
+        # Get all approved requests in this batch
+        all_user_approved = SupplyRequest.objects.filter(
             user_id=user_id,
             status='approved'
         )
         
-        count = 0
-        for req in requests:
-            if req.created_at.strftime('%Y%m%d%H%M') == target_time:
-                if req.supply.quantity >= req.quantity_requested:
-                    previous_quantity = req.supply.quantity
-                    req.supply.quantity -= req.quantity_requested
-                    req.supply.save()
-                    
-                    req.status = 'released'
-                    req.released_by = request.user
-                    req.released_at = timezone.now()
-                    req.save()
-                    
-                    InventoryTransaction.objects.create(
-                        supply=req.supply,
-                        transaction_type='out',
-                        quantity=-req.quantity_requested,
-                        previous_quantity=previous_quantity,
-                        new_quantity=req.supply.quantity,
-                        reason=f"Released for bulk request",
-                        performed_by=request.user
-                    )
-                    count += 1
+        batch_items = [
+            req for req in all_user_approved 
+            if req.created_at.strftime('%Y%m%d%H%M') == target_time
+        ]
         
-        messages.success(request, f'Successfully released {count} items in the group.')
+        if not batch_items:
+            if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+                return JsonResponse({'error': 'No approved items found in this batch'}, status=404)
+            messages.warning(request, 'No approved items found in this batch.')
+            return redirect('request_list')
+            
+        count = 0
+        error_items = []
+        
+        for req in batch_items:
+            # Check stock
+            if req.supply.quantity < req.quantity_requested:
+                error_items.append(f"{req.supply.name} (Insufficient stock)")
+                continue
+                
+            # Update supply quantity
+            previous_quantity = req.supply.quantity
+            req.supply.quantity -= req.quantity_requested
+            req.supply.save()
+            
+            # Update request status
+            req.status = 'released'
+            req.released_by = request.user
+            req.released_at = timezone.now()
+            req.save()
+            
+            # Create BorrowedItem record if it's a borrowing request
+            if '[BORROWING]' in req.purpose:
+                try:
+                    BorrowedItem.objects.create(
+                        supply=req.supply,
+                        borrower=req.user,
+                        borrowed_quantity=req.quantity_requested,
+                        borrowed_date=timezone.now().date(),
+                        location_when_borrowed=req.supply.location or '',
+                        notes=f"Released in bulk batch (Group: {group_id})"
+                    )
+                except Exception as e:
+                    print(f"Error creating BorrowedItem for {req.id}: {e}")
+            
+            # Log inventory transaction
+            InventoryTransaction.objects.create(
+                supply=req.supply,
+                transaction_type='out',
+                quantity=-req.quantity_requested,
+                previous_quantity=previous_quantity,
+                new_quantity=req.supply.quantity,
+                reason=f"Released in bulk batch (Group: {group_id})",
+                performed_by=request.user
+            )
+            count += 1
+        
+        msg = f'Successfully released {count} items.'
+        if error_items:
+            msg += f' Failed items: {", ".join(error_items)}'
+            messages.warning(request, msg)
+        else:
+            messages.success(request, msg)
+            
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+            return JsonResponse({'success': True, 'count': count, 'errors': error_items})
+            
     except Exception as e:
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+            return JsonResponse({'error': str(e)}, status=500)
         messages.error(request, f'Error during bulk release: {str(e)}')
         
     return redirect('request_list')

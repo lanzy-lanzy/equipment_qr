@@ -161,20 +161,21 @@ class SupplyRequest(models.Model):
         if not self.request_id:
             self.request_id = f"REQ-{timezone.now().strftime('%Y%m%d')}-{str(uuid.uuid4())[:8].upper()}"
         super().save(*args, **kwargs)
-        
-        # Generate QR code for borrowing requests
-        if self.purpose.startswith('[BORROWING]') and not self.borrowing_qr_code:
-            self.generate_borrowing_qr_code()
     
-    def generate_borrowing_qr_code(self):
+    def generate_borrowing_qr_code(self, group_id=None):
         """
-        Generate a QR code for borrowing requests
+        Generate a QR code for borrowing requests. Supports single and batch requests.
         """
         if not self.purpose.startswith('[BORROWING]'):
             return
             
         # Create QR code data
-        qr_data = f"BORROW-{self.id}-{self.user.id}-{self.supply.id}"
+        if group_id:
+            qr_data = f"BORROW-BATCH-{group_id}"
+            label_id = f"Batch: {group_id}"
+        else:
+            qr_data = f"BORROW-{self.id}-{self.user.id}-{self.supply.id}"
+            label_id = f"Request ID: {self.request_id}"
         
         # Generate QR code
         qr = qrcode.QRCode(version=1, box_size=10, border=5)
@@ -191,7 +192,7 @@ class SupplyRequest(models.Model):
         
         # Create a canvas with enough space for the QR code and text
         canvas_width = max(300, img_width + 100)
-        canvas_height = img_height + 100
+        canvas_height = img_height + (100 if not group_id else 80)
         canvas = Image.new('RGB', (canvas_width, canvas_height), 'white')
         draw = ImageDraw.Draw(canvas)
         
@@ -202,16 +203,25 @@ class SupplyRequest(models.Model):
         
         # Add request details
         text_y = y_offset + img_height + 10
-        draw.text((20, text_y), f"{self.supply.name[:30]}...", fill='black')
-        draw.text((20, text_y + 20), f"Request ID: {self.request_id}", fill='black')
-        draw.text((20, text_y + 40), f"Requested by: {self.user.username}", fill='black')
-        draw.text((20, text_y + 60), f"Quantity: {self.quantity_requested}", fill='black')
+        if group_id:
+            draw.text((20, text_y), "BATCH BORROWING REQUEST", fill='black')
+            draw.text((20, text_y + 20), f"Group ID: {group_id}", fill='black')
+            draw.text((20, text_y + 40), f"Requested by: {self.user.username}", fill='black')
+        else:
+            draw.text((20, text_y), f"{self.supply.name[:30]}...", fill='black')
+            draw.text((20, text_y + 20), f"Request ID: {self.request_id}", fill='black')
+            draw.text((20, text_y + 40), f"Requested by: {self.user.username}", fill='black')
+            draw.text((20, text_y + 60), f"Quantity: {self.quantity_requested}", fill='black')
         
         buffer = BytesIO()
         canvas.save(buffer, 'PNG')
         buffer.seek(0)
         
-        filename = f'borrowing_{self.id}_qr.png'
+        if group_id:
+            filename = f'borrowing_batch_{group_id}_qr.png'
+        else:
+            filename = f'borrowing_{self.id}_qr.png'
+            
         self.borrowing_qr_code.save(filename, File(buffer), save=False)
         self.save()
 
